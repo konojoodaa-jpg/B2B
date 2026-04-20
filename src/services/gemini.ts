@@ -23,19 +23,23 @@ export const geminiService = {
 
     const prompt = `You are a professional B2B lead generation and SEO expert.
     
-    Target Product/Keyword: ${niche}
+    Target Product/Core Keyword: ${niche}
     Target Country: ${country}
 
-    Goal: Simulate the autocomplete/search suggestion dropdown for three major global platforms.
-    
-    1. Google Autocomplete: Top 10 long-tail or highly relevant business search terms on google.com.${country.toLowerCase().slice(0,2)}.
-    2. Alibaba Autocomplete: Top 10 wholesale/supplier sourcing terms for this product.
-    3. Amazon Autocomplete: Top 10 high-intent buyer/retail terms for this product.
-    4. Local Language: 5-8 most relevant translations or local terms for "${niche}" in ${country}'s primary language.
+    Goal: 
+    1. Translate the core keyword "${niche}" into the primary local language of ${country}.
+    2. Simulate the autocomplete/search suggestion dropdown for three major global platforms (Google, Alibaba, Amazon).
+    3. The suggestions MUST cover BOTH English versions and Local Language versions of the search terms.
 
-    Constraint: All terms must be highly relevant and specific.
-    
-    Return the result as a JSON object with keys: google (array), alibaba (array), amazon (array), localTerms (array).`;
+    Specific Requirements:
+    - englishCore: The original or primary English commercial term for this product.
+    - localCore: The most accurate B2B sourcing translation for "${niche}" in ${country}'s language.
+    - google: Top 10 B2B search suggestions (Mixed English and Local).
+    - alibaba: Top 10 wholesale sourcing suggestions (Mixed English and Local).
+    - amazon: Top 10 high-intent buyer suggestions (Mixed English and Local).
+    - localTerms: 8-10 other highly relevant local search variants.
+
+    Return the result as a JSON object matching the keys exactly.`;
 
     try {
       const response = await ai.models.generateContent({
@@ -46,12 +50,14 @@ export const geminiService = {
           responseSchema: {
             type: Type.OBJECT,
             properties: {
+              englishCore: { type: Type.STRING },
+              localCore: { type: Type.STRING },
               google: { type: Type.ARRAY, items: { type: Type.STRING } },
               alibaba: { type: Type.ARRAY, items: { type: Type.STRING } },
               amazon: { type: Type.ARRAY, items: { type: Type.STRING } },
               localTerms: { type: Type.ARRAY, items: { type: Type.STRING } },
             },
-            required: ["google", "alibaba", "amazon", "localTerms"]
+            required: ["englishCore", "localCore", "google", "alibaba", "amazon", "localTerms"]
           }
         }
       });
@@ -91,21 +97,24 @@ export const geminiService = {
     }
   },
 
-  async simulateLeads(country: string, niche: string, count: number = 5, page: number = 1, excludedCompanies: string[] = []) {
+  async simulateLeads(country: string, englishNiche: string, localNiche: string, count: number = 10, page: number = 1, excludedCompanies: string[] = [], suggestions: string = "") {
     const ai = getAI();
     if (!ai) throw new Error("GEMINI_API_KEY is not defined.");
 
-    const prompt = `Find and return ${count} REAL B2B leads for ${niche} (distributors, medical suppliers, or relevant traders) in ${country}.
-    This is for SEARCH PAGE #${page}. 
-    
-    CRITICAL: 
-    1. Only return REAL, EXISTING companies with VERIFIABLE websites. 
-    2. USE GOOGLE SEARCH to confirm their existence and details.
-    3. DO NOT return any of these companies as they are already in the database: ${excludedCompanies.length > 0 ? excludedCompanies.join(", ") : "None"}.
-    4. Ensure the website domains are correct and active. 
-    5. Return factual data for: companyName, country, category, website, phone, email, contactPerson, position, linkedinUrl, seoRank, establishedYear.
-    
-    Categories: Distributor, Hospital, Clinic, Trader.`;
+    const prompt = `Find and return ${count} REAL B2B leads for "${englishNiche}" (also known as "${localNiche}") in ${country}.
+    Target Audience: Wholesalers, Distributors, Large Importers, and specialized B2B Retailers.
+    Search Context: Page ${page} of market research.
+    Additional Search Context (Top Autocomplete Terms): ${suggestions}
+
+    CRITICAL INSTRUCTIONS:
+    1. EXCLUSIVELY use the googleSearch tool to locate actual websites of businesses in ${country} that match this niche.
+    2. Search using BOTH "${englishNiche}" and "${localNiche}" as well as highly relevant combinations from the provided suggestions: ${suggestions}.
+    3. Only return REAL, EXISTING companies with VERIFIABLE websites. 
+    4. DO NOT return any of these companies: ${excludedCompanies.length > 0 ? excludedCompanies.join(", ") : "None"}.
+    5. Ensure you return at least 5-8 solid results if possible.
+    6. Return factual, strictly formatted JSON data for: companyName, country, category, website, phone, email (if available, otherwise "info@domain.com"), contactPerson, position, linkedinUrl, seoRank (0-100), establishedYear.
+
+    Categories must be one of: Wholesaler, Distributor, Importer, Manufacturer, Agent.`;
 
     try {
       const response = await ai.models.generateContent({

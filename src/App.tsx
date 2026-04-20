@@ -121,25 +121,39 @@ export default function App() {
       }
       
       setKeywordData(keywords);
-      addLog(`成功捕捉到来自多平台的 ${keywords.google?.length + keywords.alibaba?.length + keywords.amazon?.length} 个高意向关键词。`);
+      addLog(`[翻译校验] 英语: ${keywords.englishCore} | 当地语: ${keywords.localCore}`);
+      addLog(`成功捕捉到来自多平台的 ${keywords.google?.length + keywords.alibaba?.length + keywords.amazon?.length} 个高意向联想词。`);
 
       console.log("Calling geminiService.simulateLeads");
       // Step 2: Google Search Verification
       setSearchState(prev => ({ ...prev, progress: 30 }));
       addLog(`[第二步] 正在执行 ${selectedCountry} 市场的实时 Google 搜索验证...`);
-      addLog(`正在分析企业官网权重及活跃度...`);
+      addLog(`正在结合 "${keywords.englishCore}" 与 "${keywords.localCore}" 进行深度穿透搜索...`);
 
       // Step 3: Global Lead Extraction
       setSearchState(prev => ({ ...prev, progress: 60 }));
       addLog("[第三步] 提取已证实的 B2B 线索及决策者领英画像...");
-      addLog("正在将抓取数据与官方工商注册库进行比对...");
+      addLog("正在验证目标企业的批发/分销资质...");
 
       // Step 4: AI Enrichment & Database Sync
       setSearchState(prev => ({ ...prev, progress: 85 }));
       addLog(`[第四步] AI 背景归一化处理及入库 (批量校验)...`);
       
       const existingCompanyNames = dbLeads.map(l => l.companyName);
-      const newLeads = await geminiService.simulateLeads(selectedCountry, productKeyword, 12, searchPage, existingCompanyNames);
+      const topSuggestions = [
+        ...(keywords.google || []).slice(0, 3),
+        ...(keywords.alibaba || []).slice(0, 3)
+      ].join(", ");
+
+      const newLeads = await geminiService.simulateLeads(
+        selectedCountry, 
+        keywords.englishCore, 
+        keywords.localCore, 
+        12, 
+        searchPage, 
+        existingCompanyNames,
+        topSuggestions
+      );
       
       if (!newLeads || !Array.isArray(newLeads)) {
         throw new Error("线索模拟失败，返回结果格式异常。");
@@ -360,6 +374,14 @@ export default function App() {
                           </div>
                         ) : (
                           <div className="space-y-3">
+                            <div className="bg-blue-50/50 p-2 rounded border border-blue-100 mb-2">
+                              <div className="text-[9px] font-bold text-blue-600 mb-1">双语核心词锁定</div>
+                              <div className="flex items-center space-x-2">
+                                <span className="bg-white border px-1.5 py-0.5 rounded text-[10px] font-bold text-gray-700">EN: {keywordData.englishCore}</span>
+                                <span className="text-gray-300">/</span>
+                                <span className="bg-white border px-1.5 py-0.5 rounded text-[10px] font-bold text-blue-700">LOCAL: {keywordData.localCore}</span>
+                              </div>
+                            </div>
                             <div>
                               <div className="text-[9px] font-bold text-gray-400 mb-1 flex items-center">
                                 <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mr-1.5"></span> GOOGLE

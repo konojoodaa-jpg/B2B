@@ -1,6 +1,8 @@
 export type TargetCountry = string;
 
 export interface KeywordResults {
+  englishCore: string;
+  localCore: string;
   google: string[];
   alibaba: string[];
   amazon: string[];
