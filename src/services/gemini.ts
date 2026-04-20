@@ -37,6 +37,41 @@ function getAI() {
   }
 }
 
+async function generateWithFallback(ai: any, params: any) {
+  // Ordered by stability and likelihood of availability
+  const models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-3-flash-preview"];
+  let lastError = null;
+
+  for (const model of models) {
+    try {
+      // If the model is not 3-flash-preview, it might not support the new tools structure
+      // So we adjust params accordingly if needed, but for now we try as is
+      console.log(`[AI Logic] Attempting operation with model: ${model}`);
+      const response = await ai.models.generateContent({
+        ...params,
+        model: model
+      });
+      return response;
+    } catch (err: any) {
+      lastError = err;
+      const errorText = err?.message || "";
+      const isOverloaded = errorText.includes("503") || errorText.includes("demand") || errorText.includes("UNAVAILABLE");
+      
+      if (isOverloaded) {
+        console.warn(`[AI Logic] Model ${model} is currently overloaded. Falling back to next...`);
+        continue;
+      }
+      // If it's a structural error (e.g. tools not supported), also try fallback
+      if (errorText.includes("not found") || errorText.includes("not supported")) {
+        console.warn(`[AI Logic] Model ${model} might not support specific features. Falling back...`);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
 export const geminiService = {
   isConfigured() {
     return !!getAI();
@@ -46,7 +81,11 @@ export const geminiService = {
     const ai = getAI();
     if (!ai) throw new Error("GEMINI_API_KEY is not defined.");
 
-    const prompt = `You are a professional B2B lead generation and SEO expert.
+    const prompt = `You are a professional B2B lead generation and SEO expert... [Keywords Logic]`;
+    // Simplified prompt for context brevity in edit, keeping the spirit
+    
+    // Using the full prompt from the file
+    const fullPrompt = `You are a professional B2B lead generation and SEO expert.
     
     Target Product/Core Keyword: ${niche}
     Target Country: ${country}
@@ -67,9 +106,8 @@ export const geminiService = {
     Return the result as a JSON object matching the keys exactly.`;
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
+      const response = await generateWithFallback(ai, {
+        contents: fullPrompt,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -86,10 +124,6 @@ export const geminiService = {
           }
         }
       });
-
-      if (!response.text) {
-        throw new Error("Empty response from AI");
-      }
 
       return JSON.parse(response.text);
     } catch (err) {
@@ -110,8 +144,7 @@ export const geminiService = {
     Aesthetic: Professional, respectful of GDPR, value-driven.`;
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+      const response = await generateWithFallback(ai, {
         contents: prompt,
       });
 
@@ -149,8 +182,7 @@ export const geminiService = {
     try {
       console.log("Starting Lead Generation (Hybrid Mode) for:", englishNiche);
       
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+      const response = await generateWithFallback(ai, {
         contents: prompt,
         // @ts-ignore - tools and toolConfig are at the top level in latest SDK runtime
         tools: [{ googleSearch: {} }],
@@ -194,9 +226,8 @@ export const geminiService = {
       if (!Array.isArray(parsed) || parsed.length === 0) {
         console.warn("Primary search returned zero results. Activating Zero-Trust Fallback...");
         
-        // Use a strictly logic-based secondary model (Flash-latest) to force results from knowledge
-        const fallback = await ai.models.generateContent({
-           model: "gemini-flash-latest", 
+        // Use a strictly logic-based secondary model to force results from knowledge
+        const fallback = await generateWithFallback(ai, {
            contents: `URGENT MARKET RESEARCH: I need ${count} REAL B2B companies in ${country} for the niche: "${englishNiche}". 
            You MUST provide: companyName, website (predict if needed), category. 
            Output format: JSON ARRAY. NO MARKDOWN. NO EXPLANATION. JUST DATA.`,
