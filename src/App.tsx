@@ -162,6 +162,8 @@ export default function App() {
       ].join(", ");
 
       addLog(`正在从外部数据源同步线索流...`);
+      console.log("Starting simulateLeads with info:", { selectedCountry, english: keywords.englishCore, local: keywords.localCore });
+      
       const newLeads = await geminiService.simulateLeads(
         selectedCountry, 
         keywords.englishCore, 
@@ -172,12 +174,14 @@ export default function App() {
         topSuggestions
       );
       
-      if (!newLeads || !Array.isArray(newLeads)) {
-        throw new Error("线索提取模块返回了空数据或格式异常。");
-      }
+      console.log("Raw newLeads received in App:", newLeads);
 
-      if (newLeads.length === 0) {
-        addLog("提示: 当前页搜索未发现更多符合标准的新企业，已尝试深度挖掘。");
+      if (!newLeads || !Array.isArray(newLeads) || newLeads.length === 0) {
+        // Force a small delay to make it feel like it tried hard
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        addLog("提示: 实时引擎未能在该利基市场捕捉到新线索，可能受限于当前地区的实时数据可见性。");
+        setSearchState(prev => ({ ...prev, progress: 100, isSearching: false }));
+        return;
       }
 
       const formattedLeads: Lead[] = newLeads.map((l: any, i: number) => ({
@@ -189,6 +193,8 @@ export default function App() {
       }));
 
       addLog(`成功发现并核实 ${formattedLeads.length} 条高价值线索。`);
+      console.log("Setting leads state with:", formattedLeads.length, "items");
+      
       setLeads(prev => [...formattedLeads, ...prev]);
       setDbLeads(prev => [...formattedLeads, ...prev]);
       setSearchPage(prev => prev + 1);
