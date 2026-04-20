@@ -115,21 +115,30 @@ export const geminiService = {
     const ai = getAI();
     if (!ai) throw new Error("GEMINI_API_KEY is not defined.");
 
-    const prompt = `Find and return ${count} REAL B2B leads for "${englishNiche}" (also known as "${localNiche}") in ${country}.
-    Target Audience: Wholesalers, Distributors, Large Importers, and specialized B2B Retailers.
-    Search Context: Page ${page} of global market research.
-    Additional Search Context (Top Autocomplete Terms): ${suggestions}
+    const prompt = `You are a world-class market researcher. I need to find EXACTLY ${count} REAL and ACTIVE B2B leads for the niche "${englishNiche}" (local name: "${localNiche}") in ${country}.
+    
+    SEARCH CONTEXT:
+    - Target: Distributors, Wholesalers, and Importers.
+    - Research Page: ${page}
+    - Keywords used: ${suggestions}
 
-    INSTRUCTIONS:
-    1. USE the googleSearch tool to locate actual websites of businesses in ${country} that match this niche.
-    2. Search using BOTH "${englishNiche}" and "${localNiche}" as well as highly relevant combinations from the provided suggestions: ${suggestions}.
-    3. If the googleSearch tool returns few or no results due to specific niche constraints, use your internal knowledge of the B2B landscape in ${country} to provide the names and details of the most established and well-known companies that operate in this or closely related sectors.
-    4. Provide detailed contact profiles including direct website URLs.
-    5. Return factual, strictly formatted JSON data for: companyName, country, category, website, phone, email (if available, otherwise "info@domain.com"), contactPerson, position, linkedinUrl, seoRank (0-100), establishedYear.
+    STRICT GUIDELINES:
+    1. EXCLUSIVELY use the googleSearch tool to find actual corporate websites. 
+    2. DO NOT return hypothetical data. Every company must have a valid URL.
+    3. If search results are sparse, expand to the nearest logical B2B tier (e.g., related industrial suppliers).
+    4. You MUST return an array of objects. Do not return an empty array. If you cannot find ${count}, return as many as you can find (minimum 5).
 
-    Categories must be one of: Wholesaler, Distributor, Importer, Manufacturer, Agent.`;
+    DATA MAPPING:
+    - companyName: Full legal name.
+    - website: Full URL starting with http/https.
+    - category: Must be one of: Wholesaler, Distributor, Importer, Manufacturer, Agent, Retailer.
+    - email: Use a REAL found email or generate a plausible B2B contact email like info@company.com based on the domain.
+    - seoRank: A numeric score 10-95 based on their online presence.
+    
+    Response MUST be a raw JSON array of objects.`;
 
     try {
+      console.log("Simulating leads with prompt length:", prompt.length);
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: prompt,
@@ -160,13 +169,25 @@ export const geminiService = {
         }
       });
 
-      if (!response.text) {
-        throw new Error("Empty response from AI for leads");
+      let text = response.text || "";
+      console.log("Raw Response Length:", text.length);
+      
+      // Sanitization: Remove potential markdown wrappers if they exist despite responseMimeType
+      if (text.includes("```json")) {
+        text = text.split("```json")[1].split("```")[0];
+      } else if (text.includes("```")) {
+        text = text.split("```")[1].split("```")[0];
       }
-
-      return JSON.parse(response.text);
+      
+      const parsed = JSON.parse(text.trim());
+      if (!Array.isArray(parsed)) {
+        throw new Error("AI did not return an array as expected.");
+      }
+      
+      console.log(`Successfully parsed ${parsed.length} leads from AI.`);
+      return parsed;
     } catch (err) {
-      console.error("Gemini Lead Simulation Error:", err);
+      console.error("Gemini Lead Simulation Detailed Error:", err);
       throw err;
     }
   }

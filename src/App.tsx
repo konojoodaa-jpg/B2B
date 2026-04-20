@@ -66,6 +66,12 @@ export default function App() {
   const [selectedCountry, setSelectedCountry] = useState<TargetCountry>("波兰");
   const [dbLeads, setDbLeads] = useState<Lead[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  
+  // Debug effect to track leads state changes
+  useEffect(() => {
+    console.log(`[DEBUG] Leads State Updated: ${leads.length} items`);
+  }, [leads]);
+
   const [searchState, setSearchState] = useState<SearchState>({
     isSearching: false,
     progress: 0,
@@ -461,10 +467,13 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="glass-card overflow-hidden bg-white">
-                  <div className="p-3 border-b flex justify-between items-center bg-gray-50/50">
-                    <span className="font-bold text-sm">实时获客流 (Live Leads)</span>
-                    <button onClick={exportLeads} className="text-blue-600 text-xs font-semibold hover:underline">下载 CSV</button>
+                <div className="glass-card overflow-hidden bg-white border-2 border-blue-100">
+                  <div className="p-3 border-b flex justify-between items-center bg-blue-50/30">
+                    <span className="font-bold text-sm text-blue-900">实时获客流 (Live Leads)</span>
+                    <div className="flex items-center space-x-3">
+                      <span className="text-[10px] text-blue-500 font-mono">Count: {leads.length}</span>
+                      <button onClick={exportLeads} className="text-blue-600 text-xs font-semibold hover:underline">下载 CSV</button>
+                    </div>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left">

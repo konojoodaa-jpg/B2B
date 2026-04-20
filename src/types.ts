@@ -13,7 +13,7 @@ export interface Lead {
   id: string;
   companyName: string;
   country: TargetCountry;
-  category: "Distributor" | "Hospital" | "Clinic" | "Trader";
+  category: "Distributor" | "Hospital" | "Clinic" | "Trader" | "Wholesaler" | "Importer" | "Manufacturer" | "Agent" | "Retailer";
   website: string;
   phone: string;
   email: string;
@@ -21,7 +21,7 @@ export interface Lead {
   position: string;
   source: string;
   status: "New" | "Contacted" | "Qualified" | "Disqualified";
-  rating?: number; // 1-5 stars
+  rating?: number;
   nextFollowUp?: string;
   notes?: string;
   scrapedAt?: string;
