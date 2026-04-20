@@ -3,34 +3,32 @@ import { GoogleGenAI, Type } from "@google/genai";
 let aiInstance: GoogleGenAI | null = null;
 
 function getAI() {
-  if (!aiInstance) {
-    // Priority 1: Vite-prefixed (Standard for Vercel/Client-side)
-    const viteKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
-    // Priority 2: Process env (Standard for AI Studio / Server-side)
-    const processKey = typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : undefined;
-    // Priority 3: Meta-env non-prefixed (Sometimes works in certain envs)
-    const metaKey = (import.meta as any).env?.GEMINI_API_KEY;
+  try {
+    if (!aiInstance) {
+      // Robust key detection for Vite/Vercel/AI-Studio environments
+      const apiKey = 
+        process.env.GEMINI_API_KEY || 
+        (import.meta as any).env?.VITE_GEMINI_API_KEY || 
+        (import.meta as any).env?.GEMINI_API_KEY;
 
-    const apiKey = viteKey || processKey || metaKey;
-
-    console.log("Gemini API Initialization:", {
-      hasViteKey: !!viteKey,
-      hasProcessKey: !!processKey,
-      hasMetaKey: !!metaKey,
-      finalKeyStatus: apiKey ? "Found" : "Missing"
-    });
-    
-    if (!apiKey || apiKey === "undefined" || apiKey === "null") {
-      return null;
+      if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey === "") {
+        console.warn("AI Initialization: No API Key found in environment.");
+        return null;
+      }
+      
+      aiInstance = new GoogleGenAI({ apiKey });
+      console.log("AI Initialization: Success with key starting with", apiKey.substring(0, 4));
     }
-    aiInstance = new GoogleGenAI({ apiKey });
+    return aiInstance;
+  } catch (e) {
+    console.error("AI Initialization Error:", e);
+    return null;
   }
-  return aiInstance;
 }
 
 export const geminiService = {
   isConfigured() {
-    return getAI() !== null;
+    return !!getAI();
   },
 
   async generateKeywords(country: string, niche: string) {
