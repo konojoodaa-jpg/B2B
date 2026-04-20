@@ -96,41 +96,60 @@ export default function App() {
   };
 
   const startAutomation = async () => {
+    console.log("Automation clicked");
     if (searchState.isSearching) return;
 
-    setSearchState(prev => ({ ...prev, isSearching: true, progress: 0, log: [] }));
-    addLog(`Initiating Global Export Automation for ${productKeyword} in ${selectedCountry}...`);
+    // Force switch to workbench so user sees logic happening
+    setActiveTab("workbench");
+    
+    setSearchState(prev => ({ 
+      ...prev, 
+      isSearching: true, 
+      progress: 0, 
+      log: [`[${new Date().toLocaleTimeString()}] 正在初始化引擎...`] 
+    }));
     
     try {
+      console.log("Calling geminiService.generateKeywords");
       // Step 1: Multi-Platform Keyword Expansion
       setSearchState(prev => ({ ...prev, progress: 10 }));
-      addLog(`Step 1: Universal Autocomplete Simulation (Google, Alibaba, Amazon)...`);
+      addLog(`[第一步] 全网搜索词联想模拟 (Google, Alibaba, Amazon)...`);
       const keywords = await geminiService.generateKeywords(selectedCountry, productKeyword);
+      
+      if (!keywords) {
+        throw new Error("未能生成关键词联想，请检查 API 配置或网络。");
+      }
+      
       setKeywordData(keywords);
-      addLog(`Captured ${keywords.google.length + keywords.alibaba.length + keywords.amazon.length} high-intent keywords across platforms.`);
+      addLog(`成功捕捉到来自多平台的 ${keywords.google?.length + keywords.alibaba?.length + keywords.amazon?.length} 个高意向关键词。`);
 
+      console.log("Calling geminiService.simulateLeads");
       // Step 2: Google Search Verification
       setSearchState(prev => ({ ...prev, progress: 30 }));
-      addLog(`Step 2: Performing Real-time Google Search for ${selectedCountry} market...`);
-      addLog(`Verifying company validity and crawling active domains...`);
+      addLog(`[第二步] 正在执行 ${selectedCountry} 市场的实时 Google 搜索验证...`);
+      addLog(`正在分析企业官网权重及活跃度...`);
 
       // Step 3: Global Lead Extraction
       setSearchState(prev => ({ ...prev, progress: 60 }));
-      addLog("Step 3: Extracting verified B2B leads and decision-maker profiles...");
-      addLog("Matching contact data against official registries...");
+      addLog("[第三步] 提取已证实的 B2B 线索及决策者领英画像...");
+      addLog("正在将抓取数据与官方工商注册库进行比对...");
 
       // Step 4: AI Enrichment & Database Sync
       setSearchState(prev => ({ ...prev, progress: 85 }));
-      addLog(`Step 4: AI Grounding & Deduplication (Batch Verification)...`);
+      addLog(`[第四步] AI 背景归一化处理及入库 (批量校验)...`);
       
       const existingCompanyNames = dbLeads.map(l => l.companyName);
       const newLeads = await geminiService.simulateLeads(selectedCountry, productKeyword, 12, searchPage, existingCompanyNames);
       
+      if (!newLeads || !Array.isArray(newLeads)) {
+        throw new Error("线索模拟失败，返回结果格式异常。");
+      }
+
       const formattedLeads: Lead[] = newLeads.map((l: any, i: number) => ({
         ...l,
         id: Math.random().toString(36).substr(2, 9),
         status: "New",
-        source: `Automation Page ${searchPage}`,
+        source: `自动化搜寻 - 第 ${searchPage} 页`,
         scrapedAt: new Date().toISOString()
       }));
 
@@ -138,15 +157,15 @@ export default function App() {
       setDbLeads(prev => [...formattedLeads, ...prev]);
       setSearchPage(prev => prev + 1);
       setSearchState(prev => ({ ...prev, progress: 100, isSearching: false }));
-      addLog(`Success: 12 leads from Page ${searchPage} verified and added to database.`);
+      addLog(`完成: 已成功发现并核实来自第 ${searchPage} 页的 12 条高价值线索。`);
       
     } catch (error) {
-      console.error(error);
-      const errorMsg = error instanceof Error ? error.message : "Error occurred during automation.";
+      console.error("Automation error:", error);
+      const errorMsg = error instanceof Error ? error.message : "自动化过程发生未知错误。";
       if (errorMsg.includes("GEMINI_API_KEY")) {
-        addLog("CRITICAL: GEMINI_API_KEY is missing. Check your deployment settings.");
+        addLog("严重错误: GEMINI_API_KEY 未配置，请联系系统管理员或检查环境变量设置。");
       } else {
-        addLog(`Error: ${errorMsg}`);
+        addLog(`错误详情: ${errorMsg}`);
       }
       setSearchState(prev => ({ ...prev, isSearching: false }));
     }
@@ -237,16 +256,17 @@ export default function App() {
               ● 引擎运行中
             </span>
             <button 
-              onClick={() => {
-                console.log("Automation Start Triggered");
+              onClick={(e) => {
+                e.preventDefault();
+                console.log("Start button clicked wrapper");
                 startAutomation();
               }}
               disabled={searchState.isSearching}
               className={cn(
-                "px-5 py-2 rounded-md text-sm font-semibold transition-all shadow-sm z-50 relative",
+                "px-5 py-2 rounded-md text-sm font-semibold transition-all shadow-sm z-50 relative border border-transparent",
                 searchState.isSearching 
-                  ? "bg-gray-400 text-white cursor-not-allowed" 
-                  : "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer active:scale-95"
+                  ? "bg-gray-400 text-white cursor-not-allowed opacity-70" 
+                  : "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer active:scale-95 shadow-md hover:shadow-lg"
               )}
             >
               {searchState.isSearching ? (

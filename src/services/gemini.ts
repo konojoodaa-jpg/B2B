@@ -1,13 +1,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-let aiInstance: any = null;
+let aiInstance: GoogleGenAI | null = null;
 
 function getAI() {
   if (!aiInstance) {
-    let apiKey = process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    // In Vite with the 'define' config, process.env.GEMINI_API_KEY should be available
+    const apiKey = process.env.GEMINI_API_KEY;
     
-    // Check for common falsy strings that build tools might inject
-    if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey === "") {
+    if (!apiKey || apiKey === "undefined" || apiKey === "null") {
+      console.error("Gemini API Key is missing or invalid in environment.");
       return null;
     }
     aiInstance = new GoogleGenAI({ apiKey });
@@ -36,25 +37,34 @@ export const geminiService = {
     
     Return the result as a JSON object with keys: google (array), alibaba (array), amazon (array), localTerms (array).`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            google: { type: Type.ARRAY, items: { type: Type.STRING } },
-            alibaba: { type: Type.ARRAY, items: { type: Type.STRING } },
-            amazon: { type: Type.ARRAY, items: { type: Type.STRING } },
-            localTerms: { type: Type.ARRAY, items: { type: Type.STRING } },
-          },
-          required: ["google", "alibaba", "amazon", "localTerms"]
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              google: { type: Type.ARRAY, items: { type: Type.STRING } },
+              alibaba: { type: Type.ARRAY, items: { type: Type.STRING } },
+              amazon: { type: Type.ARRAY, items: { type: Type.STRING } },
+              localTerms: { type: Type.ARRAY, items: { type: Type.STRING } },
+            },
+            required: ["google", "alibaba", "amazon", "localTerms"]
+          }
         }
-      }
-    });
+      });
 
-    return JSON.parse(response.text);
+      if (!response.text) {
+        throw new Error("Empty response from AI");
+      }
+
+      return JSON.parse(response.text);
+    } catch (err) {
+      console.error("Gemini Keyword Generation Error:", err);
+      throw err;
+    }
   },
 
   async generateColdEmail(lead: any, myInfo: string, niche: string = "High-quality products") {
@@ -68,12 +78,17 @@ export const geminiService = {
     Goal: Introduce our ${niche} and request a brief meeting or catalog review.
     Aesthetic: Professional, respectful of GDPR, value-driven.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: prompt,
-    });
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+      });
 
-    return response.text;
+      return response.text;
+    } catch (err) {
+      console.error("Gemini Email Generation Error:", err);
+      throw err;
+    }
   },
 
   async simulateLeads(country: string, niche: string, count: number = 5, page: number = 1, excludedCompanies: string[] = []) {
@@ -92,36 +107,45 @@ export const geminiService = {
     
     Categories: Distributor, Hospital, Clinic, Trader.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        toolConfig: { includeServerSideToolInvocations: true },
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              companyName: { type: Type.STRING },
-              country: { type: Type.STRING },
-              category: { type: Type.STRING },
-              website: { type: Type.STRING },
-              phone: { type: Type.STRING },
-              email: { type: Type.STRING },
-              contactPerson: { type: Type.STRING },
-              position: { type: Type.STRING },
-              linkedinUrl: { type: Type.STRING },
-              seoRank: { type: Type.NUMBER },
-              establishedYear: { type: Type.NUMBER },
-            },
-            required: ["companyName", "country", "category", "website", "phone", "email", "contactPerson", "position", "linkedinUrl", "seoRank", "establishedYear"]
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          toolConfig: { includeServerSideToolInvocations: true },
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                companyName: { type: Type.STRING },
+                country: { type: Type.STRING },
+                category: { type: Type.STRING },
+                website: { type: Type.STRING },
+                phone: { type: Type.STRING },
+                email: { type: Type.STRING },
+                contactPerson: { type: Type.STRING },
+                position: { type: Type.STRING },
+                linkedinUrl: { type: Type.STRING },
+                seoRank: { type: Type.NUMBER },
+                establishedYear: { type: Type.NUMBER },
+              },
+              required: ["companyName", "country", "category", "website", "phone", "email", "contactPerson", "position", "linkedinUrl", "seoRank", "establishedYear"]
+            }
           }
         }
-      }
-    });
+      });
 
-    return JSON.parse(response.text);
+      if (!response.text) {
+        throw new Error("Empty response from AI for leads");
+      }
+
+      return JSON.parse(response.text);
+    } catch (err) {
+      console.error("Gemini Lead Simulation Error:", err);
+      throw err;
+    }
   }
 };
