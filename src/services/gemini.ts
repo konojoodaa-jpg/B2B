@@ -4,21 +4,23 @@ let aiInstance: GoogleGenAI | null = null;
 
 function getAI() {
   if (!aiInstance) {
-    const pk = typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : undefined;
-    const vpk = (import.meta as any).env?.VITE_GEMINI_API_KEY;
-    const gpk = (import.meta as any).env?.GEMINI_API_KEY;
+    // Priority 1: Vite-prefixed (Standard for Vercel/Client-side)
+    const viteKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    // Priority 2: Process env (Standard for AI Studio / Server-side)
+    const processKey = typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : undefined;
+    // Priority 3: Meta-env non-prefixed (Sometimes works in certain envs)
+    const metaKey = (import.meta as any).env?.GEMINI_API_KEY;
 
-    console.log("Environment Probe:", {
-      process_env: pk ? `${pk.slice(0, 4)}...` : "missing",
-      vite_env: vpk ? `${vpk.slice(0, 4)}...` : "missing",
-      alt_env: gpk ? `${gpk.slice(0, 4)}...` : "missing"
+    const apiKey = viteKey || processKey || metaKey;
+
+    console.log("Gemini API Initialization:", {
+      hasViteKey: !!viteKey,
+      hasProcessKey: !!processKey,
+      hasMetaKey: !!metaKey,
+      finalKeyStatus: apiKey ? "Found" : "Missing"
     });
-
-    // Extensive fallback for environment variables
-    const apiKey = pk || vpk || gpk;
     
-    if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey === "") {
-      console.error("Gemini API Key is missing or invalid. Found:", apiKey);
+    if (!apiKey || apiKey === "undefined" || apiKey === "null") {
       return null;
     }
     aiInstance = new GoogleGenAI({ apiKey });
@@ -141,9 +143,11 @@ export const geminiService = {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: prompt,
+        // @ts-ignore - tools and toolConfig are at the top level in latest SDK runtime
+        tools: [{ googleSearch: {} }],
+        // @ts-ignore
+        toolConfig: { includeServerSideToolInvocations: true },
         config: {
-          tools: [{ googleSearch: {} }],
-          toolConfig: { includeServerSideToolInvocations: true },
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
