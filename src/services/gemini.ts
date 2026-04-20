@@ -4,11 +4,21 @@ let aiInstance: GoogleGenAI | null = null;
 
 function getAI() {
   if (!aiInstance) {
-    // In Vite with the 'define' config, process.env.GEMINI_API_KEY should be available
-    const apiKey = process.env.GEMINI_API_KEY;
+    const pk = process.env.GEMINI_API_KEY;
+    const vpk = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    const gpk = (import.meta as any).env?.GEMINI_API_KEY;
+
+    console.log("Environment Probe:", {
+      process_env: pk ? `${pk.slice(0, 4)}...` : "missing",
+      vite_env: vpk ? `${vpk.slice(0, 4)}...` : "missing",
+      alt_env: gpk ? `${gpk.slice(0, 4)}...` : "missing"
+    });
+
+    // Extensive fallback for environment variables
+    const apiKey = pk || vpk || gpk;
     
-    if (!apiKey || apiKey === "undefined" || apiKey === "null") {
-      console.error("Gemini API Key is missing or invalid in environment.");
+    if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey === "") {
+      console.error("Gemini API Key is missing or invalid. Found:", apiKey);
       return null;
     }
     aiInstance = new GoogleGenAI({ apiKey });
@@ -17,6 +27,10 @@ function getAI() {
 }
 
 export const geminiService = {
+  isConfigured() {
+    return getAI() !== null;
+  },
+
   async generateKeywords(country: string, niche: string) {
     const ai = getAI();
     if (!ai) throw new Error("GEMINI_API_KEY is not defined.");

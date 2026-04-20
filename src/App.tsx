@@ -110,6 +110,15 @@ export default function App() {
     }));
     
     try {
+      console.log("Calling getAI check...");
+      if (!geminiService.isConfigured()) {
+        const errorMsg = "未检测到 GEMINI_API_KEY。请确保您已在 Vercel 环境变量中设置该 Key，并点击 Redeploy 重新部署。";
+        addLog(`严重错误: ${errorMsg}`);
+        alert(errorMsg); // High visibility for Vercel debugging
+        setSearchState(prev => ({ ...prev, isSearching: false }));
+        return;
+      }
+      
       console.log("Calling geminiService.generateKeywords");
       // Step 1: Multi-Platform Keyword Expansion
       setSearchState(prev => ({ ...prev, progress: 10 }));
@@ -266,13 +275,23 @@ export default function App() {
             <p className="text-xs text-[#64748b]">多维大数据驱动 | 领英/谷歌/电商 复合抓取</p>
           </div>
           <div className="flex items-center space-x-4">
+            <div className="flex flex-col items-end mr-2">
+               <span className={cn(
+                 "text-[9px] px-1.5 py-0.5 rounded font-bold uppercase",
+                 geminiService.isConfigured() ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+               )}>
+                 AI Key: {geminiService.isConfigured() ? "OK" : "Missing"}
+               </span>
+            </div>
             <span className="bg-[#10b981] text-white px-3 py-1 rounded-full text-[11px] font-bold">
               ● 引擎运行中
             </span>
             <button 
+              id="automation-trigger-btn"
               onClick={(e) => {
+                e.stopPropagation();
                 e.preventDefault();
-                console.log("Start button clicked wrapper");
+                console.log("CRITICAL: BUTTON CLICKED");
                 startAutomation();
               }}
               disabled={searchState.isSearching}
