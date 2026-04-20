@@ -27,7 +27,8 @@ import {
   Calendar,
   Save,
   Trash2,
-  X
+  X,
+  Cloud
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
@@ -60,7 +61,13 @@ const HIERARCHICAL_COUNTRIES: Record<string, Record<string, string[]>> = {
   }
 };
 
+import { auth, loginWithGoogle, logout } from "@/src/lib/firebase";
+import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
+import { dbService } from "@/src/services/db";
+
 export default function App() {
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [selectedContinent, setSelectedContinent] = useState<string>("欧洲");
   const [selectedRegion, setSelectedRegion] = useState<string>("东欧/中欧");
   const [selectedCountry, setSelectedCountry] = useState<TargetCountry>("波兰");
@@ -71,6 +78,48 @@ export default function App() {
   useEffect(() => {
     console.log(`[DEBUG] Leads State Updated: ${leads.length} items`);
   }, [leads]);
+
+  // Auth State Listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      setAuthChecked(true);
+      if (currentUser) {
+        console.log("UserID:", currentUser.uid);
+        await dbService.syncUserProfile({
+          uid: currentUser.uid,
+          email: currentUser.email,
+          displayName: currentUser.displayName,
+          photoURL: currentUser.photoURL
+        });
+        // Initial fetch
+        const savedLeads = await dbService.fetchUserLeads(currentUser.uid);
+        setLeads(savedLeads);
+        setDbLeads(savedLeads);
+        
+        const savedNotes = await dbService.getDevNotes(currentUser.uid);
+        if (savedNotes) setDevNotes(savedNotes);
+      } else {
+        setLeads([]);
+        setDbLeads([]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      await loginWithGoogle();
+      addLog("登录成功，正在加载云端数据...");
+    } catch (err) {
+      alert("登录失败，请检查网络或浏览器插件。");
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    addLog("已安全退出账户。");
+  };
 
   const [searchState, setSearchState] = useState<SearchState>({
     isSearching: false,
@@ -195,8 +244,24 @@ export default function App() {
       addLog(`成功发现并核实 ${formattedLeads.length} 条高价值线索。`);
       console.log("Setting leads state with:", formattedLeads.length, "items");
       
-      setLeads(prev => [...formattedLeads, ...prev]);
-      setDbLeads(prev => [...formattedLeads, ...prev]);
+      // Save to Firebase if user is logged in
+      if (user) {
+        addLog("正在将线索同步至云端数据库...");
+        try {
+          await dbService.batchSaveLeads(user.uid, formattedLeads);
+          // Refresh list to get Firebase IDs
+          const refreshed = await dbService.fetchUserLeads(user.uid);
+          setLeads(refreshed);
+          setDbLeads(refreshed);
+        } catch (e) {
+          addLog("❌ 云端同步失败，数据仅保存在本地。");
+        }
+      } else {
+        setLeads(prev => [...formattedLeads, ...prev]);
+        setDbLeads(prev => [...formattedLeads, ...prev]);
+        addLog("提示: 未登录状态下数据仅保存在本地内存。");
+      }
+
       setSearchPage(prev => prev + 1);
       setSearchState(prev => ({ ...prev, progress: 100, isSearching: false }));
       addLog(`自动化任务已完成，第 ${searchPage} 页数据已入库。`);
@@ -217,10 +282,23 @@ export default function App() {
     }
   };
   
-  const updateLead = (leadId: string, updates: Partial<Lead>) => {
+  const updateLead = async (leadId: string, updates: Partial<Lead>) => {
     setDbLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...updates } : l));
     if (selectedLead?.id === leadId) {
       setSelectedLead(prev => prev ? { ...prev, ...updates } : null);
+    }
+    if (user) {
+      await dbService.updateLead(leadId, updates);
+    }
+  };
+  
+  const deleteLead = async (leadId: string) => {
+    if (!confirm("确定要删除这条线索吗？此操作不可撤销。")) return;
+    setDbLeads(prev => prev.filter(l => l.id !== leadId));
+    setLeads(prev => prev.filter(l => l.id !== leadId));
+    if (selectedLead?.id === leadId) setSelectedLead(null);
+    if (user) {
+      await dbService.deleteLead(leadId);
     }
   };
 
@@ -238,6 +316,20 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const saveDevNotes = async () => {
+    if (user) {
+      addLog("正在保存您的心得至云端...");
+      try {
+        await dbService.syncDevNotes(user.uid, devNotes);
+        addLog("✅ 心得已同步。");
+      } catch (e) {
+        addLog("❌ 心得保存失败。");
+      }
+    } else {
+      alert("请先登录以保存心得。");
+    }
   };
 
   const sortedDbLeads = [...dbLeads]
@@ -297,18 +389,52 @@ export default function App() {
             <h1 className="text-lg font-bold text-[#0f172a]">全球 B2B 自动化扩张引擎</h1>
             <p className="text-xs text-[#64748b]">多维大数据驱动 | 领英/谷歌/电商 复合抓取</p>
           </div>
-          <div className="flex items-center space-x-4">
-            <div className="flex flex-col items-end mr-2">
+          <div className="flex items-center space-x-6">
+            <div className="flex flex-col items-end">
                <span className={cn(
-                 "text-[9px] px-1.5 py-0.5 rounded font-bold uppercase",
+                 "text-[9px] px-1.5 py-0.5 rounded font-bold uppercase mb-1",
                  geminiService.isConfigured() ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
                )}>
                  AI Key: {geminiService.isConfigured() ? "OK" : "Missing"}
                </span>
+               <div className="flex items-center gap-2">
+                 <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse" />
+                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">引擎就绪</span>
+               </div>
             </div>
-            <span className="bg-[#10b981] text-white px-3 py-1 rounded-full text-[11px] font-bold">
-              ● 引擎运行中
-            </span>
+
+            {user ? (
+              <div className="flex items-center gap-3 border-l pl-6 border-gray-100">
+                <div className="text-right hidden sm:block">
+                  <p className="text-xs font-bold text-gray-900">{user.displayName}</p>
+                  <p className="text-[10px] text-indigo-600 font-medium leading-none">云端同步中</p>
+                </div>
+                {user.photoURL && (
+                  <img 
+                    src={user.photoURL} 
+                    alt="Profile" 
+                    className="w-8 h-8 rounded-full ring-2 ring-indigo-50 shadow-sm" 
+                    referrerPolicy="no-referrer" 
+                  />
+                )}
+                <button 
+                  onClick={handleLogout}
+                  className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                  title="安全退出"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleLogin}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all text-xs font-bold shadow-md shadow-indigo-100 active:scale-95"
+              >
+                <Users className="w-4 h-4" />
+                登录开启云存储
+              </button>
+            )}
+
             <button 
               id="automation-trigger-btn"
               onClick={(e) => {
@@ -319,18 +445,18 @@ export default function App() {
               }}
               disabled={searchState.isSearching}
               className={cn(
-                "px-5 py-2 rounded-md text-sm font-semibold transition-all shadow-sm z-50 relative border border-transparent",
+                "px-5 py-2 rounded-lg text-sm font-bold transition-all shadow-md z-50 relative border-0",
                 searchState.isSearching 
-                  ? "bg-gray-400 text-white cursor-not-allowed opacity-70" 
-                  : "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer active:scale-95 shadow-md hover:shadow-lg"
+                  ? "bg-gray-200 text-gray-500 cursor-not-allowed" 
+                  : "bg-[#0f172a] hover:bg-black text-white hover:shadow-black/20"
               )}
             >
               {searchState.isSearching ? (
                 <span className="flex items-center space-x-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>获客进行中...</span>
+                  <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+                  <span>抓取中...</span>
                 </span>
-              ) : "一键开始全域获客"}
+              ) : "全域自动获客"}
             </button>
           </div>
         </header>
@@ -749,10 +875,17 @@ export default function App() {
                          const time = new Date().toLocaleString();
                          setDevNotes(prev => `**${time} 记录:**\n\n\n---\n` + prev);
                        }}
-                       className="bg-slate-900 text-white px-4 py-2 rounded text-sm font-bold flex items-center space-x-2"
+                       className="bg-slate-100 text-slate-700 hover:bg-slate-200 px-4 py-2 rounded text-sm font-bold flex items-center space-x-2 transition-all"
                      >
                         <Save className="w-4 h-4" />
-                        <span>新增记录</span>
+                        <span>快速模板</span>
+                     </button>
+                     <button 
+                       onClick={saveDevNotes}
+                       className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded shadow-md shadow-indigo-100 text-sm font-bold flex items-center space-x-2 transition-all active:scale-95"
+                     >
+                        <Cloud className="w-4 h-4" />
+                        <span>同步至云端</span>
                      </button>
                   </div>
                </section>

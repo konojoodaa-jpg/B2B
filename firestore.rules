@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    function isDataOwner() {
+      return isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+    }
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+    function isValidId(id) {
+       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Entity Validation ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid is string && data.uid.size() <= 128 &&
+             data.email is string && data.email.size() <= 256;
+    }
+
+    function isValidLead(data) {
+      return data.keys().hasAll(['userId', 'companyName', 'website', 'scrapedAt']) &&
+             data.userId == request.auth.uid &&
+             data.companyName is string && data.companyName.size() <= 256 &&
+             data.website is string && data.website.size() <= 512 &&
+             data.scrapedAt is string &&
+             (data.get('phone', '') is string) &&
+             (data.get('email', '') is string) &&
+             (data.get('seoRank', 0) is number);
+    }
+
+    // --- Match Blocks ---
+
+    // Users collection
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    // Leads collection
+    match /leads/{leadId} {
+      // List/Get: Owner only
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      
+      // Create: Owner only + Validation
+      allow create: if isSignedIn() && isValidLead(request.resource.data);
+      
+      // Update: Owner only + restricted fields
+      allow update: if isOwner(resource.data.userId) && 
+                      isValidLead(request.resource.data) &&
+                      request.resource.data.userId == resource.data.userId &&
+                      // Action: Status update or metadata update
+                      request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'category', 'contactPerson', 'position']);
+                      
+      // Delete: Owner only
+      allow delete: if isOwner(resource.data.userId);
+    }
+  }
+}

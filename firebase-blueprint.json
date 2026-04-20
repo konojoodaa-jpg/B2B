@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastLogin": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "A business lead found by the system",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "companyName": { "type": "string" },
+        "country": { "type": "string" },
+        "category": { "type": "string" },
+        "website": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "contactPerson": { "type": "string" },
+        "position": { "type": "string" },
+        "linkedinUrl": { "type": "string" },
+        "seoRank": { "type": "number" },
+        "establishedYear": { "type": "number" },
+        "status": { "type": "string", "enum": ["New", "Contacted", "Interested", "Closed"] },
+        "source": { "type": "string" },
+        "scrapedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "companyName", "website", "scrapedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/leads/{leadId}": {
+      "schema": "Lead",
+      "description": "Global collection of leads, filtered by userId"
+    }
+  }
+}
