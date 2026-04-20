@@ -283,8 +283,12 @@ export default function App() {
       const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
       
       const isHighDemand = errorMsg.includes("503") || errorMsg.includes("high demand") || errorMsg.includes("UNAVAILABLE");
-      
-      if (isHighDemand) {
+      const isQuota = errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("exhausted");
+
+      if (isQuota) {
+        addLog("🚨 警告: AI 免费额度已耗尽 (Daily Quota Exceeded)。");
+        alert("自动化失败: 您的 API 免费配额已达上限。\n\nGemini 3 系列在免费层级有每日调用次数限制。您可以：\n1. 等待明日配额刷新后重试。\n2. 在 Vercel 后台设置您自己的 VITE_GEMINI_API_KEY 以获得更高的专属额度。");
+      } else if (isHighDemand) {
         addLog("⚠️ 提示: AI 服务目前正处于平峰期，请求已排队。");
         alert("自动化失败: AI 官方服务目前繁忙 (503 High Demand)。\n\n这通常是暂时的，请等待 1-2 分钟后重试。");
       } else {

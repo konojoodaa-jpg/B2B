@@ -25,11 +25,12 @@ function getAI() {
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function generateWithFallback(ai: any, params: any) {
-  // Ordered by stability and likelihood of availability according to current project constraints
+  // Broader variety of models to bypass specific model-based quotas
   const models = [
-    "gemini-flash-latest", 
-    "gemini-3.1-flash-lite-preview", 
-    "gemini-3-flash-preview"
+    "gemini-flash-latest",            // Balanced
+    "gemini-3.1-flash-lite-preview",  // High availability
+    "gemini-3-flash-preview",         // High performance
+    "gemini-3.1-pro-preview"          // Most robust (last resort)
   ];
   let lastError = null;
 
@@ -45,22 +46,27 @@ async function generateWithFallback(ai: any, params: any) {
     } catch (err: any) {
       lastError = err;
       
-      const errorString = JSON.stringify(err);
+      const errorString = JSON.stringify(err).toLowerCase();
       const isOverloaded = 
         errorString.includes("503") || 
-        errorString.includes("high demand") || 
-        errorString.includes("UNAVAILABLE") ||
-        errorString.includes("Resource exhausted");
+        errorString.includes("unavailable") || 
+        errorString.includes("high demand");
+      
+      const isQuotaExceeded = 
+        errorString.includes("429") || 
+        errorString.includes("quota") || 
+        errorString.includes("exhausted");
 
-      if (isOverloaded) {
-        console.warn(`[AI Logic] Model ${model} is overloaded or unavailable. Waiting 2s...`);
-        await sleep(2000);
+      if (isOverloaded || isQuotaExceeded) {
+        console.warn(`[AI Logic] Model ${model} returned ${isQuotaExceeded ? "Quota Exceeded" : "Overload"}. Trying next model...`);
+        // If it's quota, don't wait as much, just skip to another model
+        if (isOverloaded) await sleep(1500); 
         continue;
       }
       
       // If it's a tools error or we reached the end, try one last time WITHOUT tools using a stable model
       if (params.tools && i === models.length - 1) {
-        console.warn("[AI Logic] Tools might be failing. Final attempt without tools...");
+        console.warn("[AI Logic] Tools/Quota issues persist. Final attempt without tools on standard model...");
         try {
           const { tools, toolConfig, ...paramsWithoutTools } = params;
           const response = await ai.models.generateContent({
