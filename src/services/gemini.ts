@@ -4,9 +4,10 @@ let aiInstance: any = null;
 
 function getAI() {
   if (!aiInstance) {
-    const apiKey = process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
-    if (!apiKey) {
-      // In production, we don't want to crash top-level, but we need the key for calls.
+    let apiKey = process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    
+    // Check for common falsy strings that build tools might inject
+    if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey === "") {
       return null;
     }
     aiInstance = new GoogleGenAI({ apiKey });

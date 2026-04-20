@@ -237,11 +237,24 @@ export default function App() {
               ● 引擎运行中
             </span>
             <button 
-              onClick={startAutomation}
+              onClick={() => {
+                console.log("Automation Start Triggered");
+                startAutomation();
+              }}
               disabled={searchState.isSearching}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-5 py-2 rounded-md text-sm font-semibold transition-all shadow-sm"
+              className={cn(
+                "px-5 py-2 rounded-md text-sm font-semibold transition-all shadow-sm z-50 relative",
+                searchState.isSearching 
+                  ? "bg-gray-400 text-white cursor-not-allowed" 
+                  : "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer active:scale-95"
+              )}
             >
-              {searchState.isSearching ? "获客进行中..." : "一键开始全域获客"}
+              {searchState.isSearching ? (
+                <span className="flex items-center space-x-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>获客进行中...</span>
+                </span>
+              ) : "一键开始全域获客"}
             </button>
           </div>
         </header>
