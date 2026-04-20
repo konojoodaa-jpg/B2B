@@ -37,15 +37,15 @@ function getAI() {
   }
 }
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function generateWithFallback(ai: any, params: any) {
-  // Ordered by stability and likelihood of availability
   const models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-3-flash-preview"];
   let lastError = null;
 
-  for (const model of models) {
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
     try {
-      // If the model is not 3-flash-preview, it might not support the new tools structure
-      // So we adjust params accordingly if needed, but for now we try as is
       console.log(`[AI Logic] Attempting operation with model: ${model}`);
       const response = await ai.models.generateContent({
         ...params,
@@ -54,18 +54,36 @@ async function generateWithFallback(ai: any, params: any) {
       return response;
     } catch (err: any) {
       lastError = err;
-      const errorText = err?.message || "";
-      const isOverloaded = errorText.includes("503") || errorText.includes("demand") || errorText.includes("UNAVAILABLE");
       
+      // Determine if this is a high demand / overloaded error
+      const errorString = JSON.stringify(err);
+      const isOverloaded = 
+        errorString.includes("503") || 
+        errorString.includes("high demand") || 
+        errorString.includes("UNAVAILABLE") ||
+        errorString.includes("Resource exhausted");
+
       if (isOverloaded) {
-        console.warn(`[AI Logic] Model ${model} is currently overloaded. Falling back to next...`);
+        console.warn(`[AI Logic] Model ${model} is overloaded or unavailable. Waiting 2s and retrying with fallback...`);
+        await sleep(2000); // Wait 2 seconds before trying next model
         continue;
       }
-      // If it's a structural error (e.g. tools not supported), also try fallback
-      if (errorText.includes("not found") || errorText.includes("not supported")) {
-        console.warn(`[AI Logic] Model ${model} might not support specific features. Falling back...`);
-        continue;
+      
+      // If it's a tools error, try one last time WITHOUT tools
+      if (params.tools && i === models.length - 1) {
+        console.warn("[AI Logic] Tools might be failing. Final attempt without tools...");
+        try {
+          const { tools, toolConfig, ...paramsWithoutTools } = params;
+          const response = await ai.models.generateContent({
+            ...paramsWithoutTools,
+            model: "gemini-1.5-flash"
+          });
+          return response;
+        } catch (innerErr) {
+          throw innerErr;
+        }
       }
+
       throw err;
     }
   }

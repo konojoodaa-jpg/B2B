@@ -278,10 +278,19 @@ export default function App() {
       // Final physical confirmation for debugging
       alert(`获客任务已运行完毕！本次新增线索量: ${formattedLeads.length}`);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Automation error:", error);
-      const errorMsg = error instanceof Error ? error.message : "自动化过程发生未知错误。";
-      alert(`自动化发生内部错误: ${errorMsg}`);
+      const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
+      
+      const isHighDemand = errorMsg.includes("503") || errorMsg.includes("high demand") || errorMsg.includes("UNAVAILABLE");
+      
+      if (isHighDemand) {
+        addLog("⚠️ 提示: AI 服务目前正处于平峰期，请求已排队。");
+        alert("自动化失败: AI 官方服务目前繁忙 (503 High Demand)。\n\n这通常是暂时的，请等待 1-2 分钟后重试。");
+      } else {
+        alert(`自动化发生内部错误: ${errorMsg}`);
+      }
+      
       if (errorMsg.includes("GEMINI_API_KEY")) {
         addLog("严重错误: GEMINI_API_KEY 未配置，请联系系统管理员或检查环境变量设置。");
       } else {
