@@ -142,7 +142,12 @@ export default function App() {
       
     } catch (error) {
       console.error(error);
-      addLog("Error occurred during automation. Please check API settings.");
+      const errorMsg = error instanceof Error ? error.message : "Error occurred during automation.";
+      if (errorMsg.includes("GEMINI_API_KEY")) {
+        addLog("CRITICAL: GEMINI_API_KEY is missing. Check your deployment settings.");
+      } else {
+        addLog(`Error: ${errorMsg}`);
+      }
       setSearchState(prev => ({ ...prev, isSearching: false }));
     }
   };
@@ -184,16 +189,8 @@ export default function App() {
       return new Date(b.scrapedAt || 0).getTime() - new Date(a.scrapedAt || 0).getTime();
     });
 
-  const isApiKeyMissing = !process.env.GEMINI_API_KEY;
-
   return (
     <div className="flex h-screen overflow-hidden font-sans">
-      {isApiKeyMissing && (
-        <div className="fixed top-0 left-0 right-0 z-[100] bg-red-600 text-white px-4 py-2 text-center text-xs font-bold shadow-lg">
-          <AlertCircle className="w-3 h-3 inline-block mr-2" />
-          警告: GEMINI_API_KEY 未定义。请在部署环境（如 Vercel Settings {"->"} Environment Variables）中设置该变量。
-        </div>
-      )}
       {/* Sidebar - High Density Professional Navigation */}
       <aside className="w-60 bg-[#1e293b] text-white flex flex-col py-6 shrink-0 transition-all">
         <div className="px-6 mb-8 text-[18px] font-extrabold tracking-tight text-blue-500">
