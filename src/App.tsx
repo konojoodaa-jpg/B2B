@@ -201,9 +201,13 @@ export default function App() {
       setSearchState(prev => ({ ...prev, progress: 100, isSearching: false }));
       addLog(`自动化任务已完成，第 ${searchPage} 页数据已入库。`);
       
+      // Final physical confirmation for debugging
+      alert(`获客任务已运行完毕！本次新增线索量: ${formattedLeads.length}`);
+      
     } catch (error) {
       console.error("Automation error:", error);
       const errorMsg = error instanceof Error ? error.message : "自动化过程发生未知错误。";
+      alert(`自动化发生内部错误: ${errorMsg}`);
       if (errorMsg.includes("GEMINI_API_KEY")) {
         addLog("严重错误: GEMINI_API_KEY 未配置，请联系系统管理员或检查环境变量设置。");
       } else {
