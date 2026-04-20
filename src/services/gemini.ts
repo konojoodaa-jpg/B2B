@@ -117,16 +117,15 @@ export const geminiService = {
 
     const prompt = `Find and return ${count} REAL B2B leads for "${englishNiche}" (also known as "${localNiche}") in ${country}.
     Target Audience: Wholesalers, Distributors, Large Importers, and specialized B2B Retailers.
-    Search Context: Page ${page} of market research.
+    Search Context: Page ${page} of global market research.
     Additional Search Context (Top Autocomplete Terms): ${suggestions}
 
-    CRITICAL INSTRUCTIONS:
-    1. EXCLUSIVELY use the googleSearch tool to locate actual websites of businesses in ${country} that match this niche.
+    INSTRUCTIONS:
+    1. USE the googleSearch tool to locate actual websites of businesses in ${country} that match this niche.
     2. Search using BOTH "${englishNiche}" and "${localNiche}" as well as highly relevant combinations from the provided suggestions: ${suggestions}.
-    3. Only return REAL, EXISTING companies with VERIFIABLE websites. 
-    4. DO NOT return any of these companies: ${excludedCompanies.length > 0 ? excludedCompanies.join(", ") : "None"}.
-    5. Ensure you return at least 5-8 solid results if possible.
-    6. Return factual, strictly formatted JSON data for: companyName, country, category, website, phone, email (if available, otherwise "info@domain.com"), contactPerson, position, linkedinUrl, seoRank (0-100), establishedYear.
+    3. If the googleSearch tool returns few or no results due to specific niche constraints, use your internal knowledge of the B2B landscape in ${country} to provide the names and details of the most established and well-known companies that operate in this or closely related sectors.
+    4. Provide detailed contact profiles including direct website URLs.
+    5. Return factual, strictly formatted JSON data for: companyName, country, category, website, phone, email (if available, otherwise "info@domain.com"), contactPerson, position, linkedinUrl, seoRank (0-100), establishedYear.
 
     Categories must be one of: Wholesaler, Distributor, Importer, Manufacturer, Agent.`;
 

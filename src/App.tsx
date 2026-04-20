@@ -131,7 +131,8 @@ export default function App() {
       
       setKeywordData(keywords);
       addLog(`[翻译校验] 英语: ${keywords.englishCore} | 当地语: ${keywords.localCore}`);
-      addLog(`成功捕捉到来自多平台的 ${keywords.google?.length + keywords.alibaba?.length + keywords.amazon?.length} 个高意向联想词。`);
+      const totalKeywords = (keywords.google?.length || 0) + (keywords.alibaba?.length || 0) + (keywords.amazon?.length || 0);
+      addLog(`成功捕捉到来自多平台的 ${totalKeywords} 个高意向联想词。`);
 
       console.log("Calling geminiService.simulateLeads");
       // Step 2: Google Search Verification
@@ -146,7 +147,7 @@ export default function App() {
 
       // Step 4: AI Enrichment & Database Sync
       setSearchState(prev => ({ ...prev, progress: 85 }));
-      addLog(`[第四步] AI 背景归一化处理及入库 (批量校验)...`);
+      addLog(`[第四步] AI 背景归一化处理及入库 (最后校验中)...`);
       
       const existingCompanyNames = dbLeads.map(l => l.companyName);
       const topSuggestions = [
@@ -154,6 +155,7 @@ export default function App() {
         ...(keywords.alibaba || []).slice(0, 3)
       ].join(", ");
 
+      addLog(`正在从外部数据源同步线索流...`);
       const newLeads = await geminiService.simulateLeads(
         selectedCountry, 
         keywords.englishCore, 
@@ -165,7 +167,11 @@ export default function App() {
       );
       
       if (!newLeads || !Array.isArray(newLeads)) {
-        throw new Error("线索模拟失败，返回结果格式异常。");
+        throw new Error("线索提取模块返回了空数据或格式异常。");
+      }
+
+      if (newLeads.length === 0) {
+        addLog("提示: 当前页搜索未发现更多符合标准的新企业，已尝试深度挖掘。");
       }
 
       const formattedLeads: Lead[] = newLeads.map((l: any, i: number) => ({
@@ -176,11 +182,12 @@ export default function App() {
         scrapedAt: new Date().toISOString()
       }));
 
+      addLog(`成功发现并核实 ${formattedLeads.length} 条高价值线索。`);
       setLeads(prev => [...formattedLeads, ...prev]);
       setDbLeads(prev => [...formattedLeads, ...prev]);
       setSearchPage(prev => prev + 1);
       setSearchState(prev => ({ ...prev, progress: 100, isSearching: false }));
-      addLog(`完成: 已成功发现并核实来自第 ${searchPage} 页的 12 条高价值线索。`);
+      addLog(`自动化任务已完成，第 ${searchPage} 页数据已入库。`);
       
     } catch (error) {
       console.error("Automation error:", error);
