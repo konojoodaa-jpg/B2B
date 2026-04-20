@@ -5,26 +5,11 @@ let aiInstance: GoogleGenAI | null = null;
 function getAI() {
   try {
     if (!aiInstance) {
-      // Priority 1: VITE_ prefixed (Standard for Vite production)
-      const viteKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
-      // Priority 2: Non-prefixed meta (Some environments)
-      const metaKey = (import.meta as any).env?.GEMINI_API_KEY;
-      // Priority 3: Process env (For SSR or specific build tools)
-      const processKey = typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : undefined;
-
-      const apiKey = viteKey || metaKey || processKey;
-
-      // Debug logging - check browser console (F12) to see this
-      console.log("Gemini API Diagnostic:", {
-        version: "1.2.0-VercelFix",
-        viteKeyDetected: !!viteKey,
-        metaKeyDetected: !!metaKey,
-        processKeyDetected: !!processKey,
-        finalStatus: apiKey ? "Found" : "Missing"
-      });
+      // Per gemini-api skill: Always use process.env.GEMINI_API_KEY for React/Vite in this environment
+      const apiKey = process.env.GEMINI_API_KEY;
 
       if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey === "") {
-        console.warn("AI Init: API Key is empty or undefined.");
+        console.warn("AI Init: GEMINI_API_KEY is not defined in process.env.");
         return null;
       }
       
@@ -40,7 +25,12 @@ function getAI() {
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function generateWithFallback(ai: any, params: any) {
-  const models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-3-flash-preview"];
+  // Ordered by stability and likelihood of availability according to current project constraints
+  const models = [
+    "gemini-flash-latest", 
+    "gemini-3.1-flash-lite-preview", 
+    "gemini-3-flash-preview"
+  ];
   let lastError = null;
 
   for (let i = 0; i < models.length; i++) {
@@ -55,7 +45,6 @@ async function generateWithFallback(ai: any, params: any) {
     } catch (err: any) {
       lastError = err;
       
-      // Determine if this is a high demand / overloaded error
       const errorString = JSON.stringify(err);
       const isOverloaded = 
         errorString.includes("503") || 
@@ -64,19 +53,19 @@ async function generateWithFallback(ai: any, params: any) {
         errorString.includes("Resource exhausted");
 
       if (isOverloaded) {
-        console.warn(`[AI Logic] Model ${model} is overloaded or unavailable. Waiting 2s and retrying with fallback...`);
-        await sleep(2000); // Wait 2 seconds before trying next model
+        console.warn(`[AI Logic] Model ${model} is overloaded or unavailable. Waiting 2s...`);
+        await sleep(2000);
         continue;
       }
       
-      // If it's a tools error, try one last time WITHOUT tools
+      // If it's a tools error or we reached the end, try one last time WITHOUT tools using a stable model
       if (params.tools && i === models.length - 1) {
         console.warn("[AI Logic] Tools might be failing. Final attempt without tools...");
         try {
           const { tools, toolConfig, ...paramsWithoutTools } = params;
           const response = await ai.models.generateContent({
             ...paramsWithoutTools,
-            model: "gemini-1.5-flash"
+            model: "gemini-flash-latest"
           });
           return response;
         } catch (innerErr) {
