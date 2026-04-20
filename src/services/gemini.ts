@@ -5,23 +5,34 @@ let aiInstance: GoogleGenAI | null = null;
 function getAI() {
   try {
     if (!aiInstance) {
-      // Robust key detection for Vite/Vercel/AI-Studio environments
-      const apiKey = 
-        process.env.GEMINI_API_KEY || 
-        (import.meta as any).env?.VITE_GEMINI_API_KEY || 
-        (import.meta as any).env?.GEMINI_API_KEY;
+      // Priority 1: VITE_ prefixed (Standard for Vite production)
+      const viteKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+      // Priority 2: Non-prefixed meta (Some environments)
+      const metaKey = (import.meta as any).env?.GEMINI_API_KEY;
+      // Priority 3: Process env (For SSR or specific build tools)
+      const processKey = typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : undefined;
+
+      const apiKey = viteKey || metaKey || processKey;
+
+      // Debug logging - check browser console (F12) to see this
+      console.log("Gemini API Diagnostic:", {
+        version: "1.2.0-VercelFix",
+        viteKeyDetected: !!viteKey,
+        metaKeyDetected: !!metaKey,
+        processKeyDetected: !!processKey,
+        finalStatus: apiKey ? "Found" : "Missing"
+      });
 
       if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey === "") {
-        console.warn("AI Initialization: No API Key found in environment.");
+        console.warn("AI Init: API Key is empty or undefined.");
         return null;
       }
       
       aiInstance = new GoogleGenAI({ apiKey });
-      console.log("AI Initialization: Success with key starting with", apiKey.substring(0, 4));
     }
     return aiInstance;
   } catch (e) {
-    console.error("AI Initialization Error:", e);
+    console.error("AI Initialization Critical Fail:", e);
     return null;
   }
 }

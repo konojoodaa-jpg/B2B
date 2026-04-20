@@ -111,8 +111,13 @@ export default function App() {
     try {
       await loginWithGoogle();
       addLog("登录成功，正在加载云端数据...");
-    } catch (err) {
-      alert("登录失败，请检查网络或浏览器插件。");
+    } catch (err: any) {
+      console.error("Login failed:", err);
+      const isDomainError = err?.code === "auth/unauthorized-domain";
+      alert(isDomainError 
+        ? `登录失败: 域名未授权。\n\n请在 Firebase 控制台的 Authentication -> Settings -> Authorized Domains 中添加当前域名: ${window.location.hostname}`
+        : `登录失败: ${err.message || "请检查网络或浏览器插件。"}`
+      );
     }
   };
 
@@ -253,8 +258,12 @@ export default function App() {
           const refreshed = await dbService.fetchUserLeads(user.uid);
           setLeads(refreshed);
           setDbLeads(refreshed);
+          addLog("✅ 云端同步完成。");
         } catch (e) {
-          addLog("❌ 云端同步失败，数据仅保存在本地。");
+          console.error("Database sync error:", e);
+          addLog("⚠️ 分部数据同步受阻 (可能需配置白名单)，但已为您保存至本地。");
+          setLeads(prev => [...formattedLeads, ...prev]);
+          setDbLeads(prev => [...formattedLeads, ...prev]);
         }
       } else {
         setLeads(prev => [...formattedLeads, ...prev]);
