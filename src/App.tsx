@@ -114,8 +114,11 @@ export default function App() {
     } catch (err: any) {
       console.error("Login failed:", err);
       const isDomainError = err?.code === "auth/unauthorized-domain";
+      const vercelMsg = isDomainError 
+        ? `\n\n检测到您可能在 Vercel 环境下运行。\n请在 Firebase 控制台: Authenticaion -> Settings -> Authorized Domains 中点击 'Add domain'，然后输入：\n${window.location.host}` 
+        : "";
       alert(isDomainError 
-        ? `登录失败: 域名未授权。\n\n请在 Firebase 控制台的 Authentication -> Settings -> Authorized Domains 中添加当前域名: ${window.location.hostname}`
+        ? `登录失败: 域名未授权。${vercelMsg}`
         : `登录失败: ${err.message || "请检查网络或浏览器插件。"}`
       );
     }
@@ -202,12 +205,13 @@ export default function App() {
 
       // Step 3: Global Lead Extraction
       setSearchState(prev => ({ ...prev, progress: 60 }));
-      addLog("[第三步] 提取已证实的 B2B 线索及决策者领英画像...");
+      addLog("[第三步] 提取已证实的 B2B 企业领英主页 (LinkedIn Company)...");
+      addLog("排除个人虚假账号，仅抓取官方企业背书页面...");
       addLog("正在验证目标企业的批发/分销资质...");
 
       // Step 4: AI Enrichment & Database Sync
       setSearchState(prev => ({ ...prev, progress: 85 }));
-      addLog(`[第四步] AI 背景归一化处理及入库 (最后校验中)...`);
+      addLog(`[第四步] 整理企业官方社交媒体及主页 (最后校验中)...`);
       
       const existingCompanyNames = dbLeads.map(l => l.companyName);
       const topSuggestions = [
@@ -639,7 +643,7 @@ export default function App() {
                         <tr className="bg-gray-50 text-[11px] font-semibold text-[#64748b] border-b">
                           <th className="px-4 py-3">公司名称</th>
                           <th className="px-4 py-3">国家</th>
-                          <th className="px-4 py-3">负责人</th>
+                          <th className="px-4 py-3">企业领英主页 (Company Page)</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#e2e8f0]">
@@ -647,10 +651,17 @@ export default function App() {
                            <tr key={lead.id} className="text-sm">
                               <td className="px-4 py-3">
                                 <div className="font-bold">{lead.companyName}</div>
-                                <div className="text-[10px] text-blue-600">{lead.website}</div>
+                                <div className="text-[10px] text-blue-600 truncate max-w-[200px]">{lead.website}</div>
                               </td>
                               <td className="px-4 py-3 text-xs">{lead.country}</td>
-                              <td className="px-4 py-3 text-xs">{lead.contactPerson}</td>
+                              <td className="px-4 py-3 text-xs">
+                                {lead.linkedinUrl && lead.linkedinUrl !== "#" ? (
+                                  <a href={lead.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline flex items-center gap-1">
+                                    <Linkedin className="w-3 h-3" />
+                                    访问主页
+                                  </a>
+                                ) : <span className="text-gray-300">未收录</span>}
+                              </td>
                            </tr>
                         ))}
                       </tbody>
@@ -1018,14 +1029,30 @@ function LeadDetailModal({ lead, onClose, onUpdate }: { lead: Lead, onClose: () 
             />
           </div>
 
-          <div className="bg-blue-50 rounded-lg p-3 flex items-start space-x-3">
-            <div className="p-2 bg-blue-100 rounded text-blue-600"><Users className="w-5 h-5" /></div>
-            <div>
-              <div className="text-sm font-bold text-blue-900">{lead.contactPerson}</div>
-              <div className="text-xs text-blue-700">{lead.position}</div>
-              <div className="mt-1 flex items-center space-x-3">
-                <span className="text-[10px] font-mono text-blue-500">{lead.email}</span>
-                <span className="text-[10px] font-mono text-blue-500">{lead.phone}</span>
+          <div className="bg-blue-50 rounded-lg p-4 flex items-start space-x-3">
+            <div className="p-2.5 bg-blue-100 rounded text-blue-600 border border-blue-200">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div className="flex-1">
+              <div className="text-sm font-bold text-blue-900 leading-snug">官方联系信息</div>
+              <div className="mt-2 grid grid-cols-2 gap-y-2 gap-x-4">
+                <div className="flex flex-col">
+                  <span className="text-[9px] uppercase font-bold text-blue-400">Email</span>
+                  <span className="text-xs font-mono text-blue-800 break-all">{lead.email}</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[9px] uppercase font-bold text-blue-400">Phone</span>
+                  <span className="text-xs font-mono text-blue-800">{lead.phone}</span>
+                </div>
+                {lead.linkedinUrl && lead.linkedinUrl !== "#" && (
+                  <div className="flex flex-col col-span-2 mt-1">
+                    <span className="text-[9px] uppercase font-bold text-blue-400">Official LinkedIn</span>
+                    <a href={lead.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-indigo-700 hover:underline flex items-center gap-1.5 mt-0.5">
+                      <Linkedin className="w-3 h-3" />
+                      Visit Company Page
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
           </div>

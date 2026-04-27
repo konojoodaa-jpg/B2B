@@ -180,15 +180,17 @@ export const geminiService = {
 
     GUIDELINES:
     1. FIRST: Use the googleSearch tool to locate ACTUAL websites and contact details of real companies currently operating in ${country}.
-    2. SECOND: If the search results are insufficient or zero, you MUST draw upon your vast internal knowledge of the B2B landscape in ${country} to provide the names, high-probability domains, and estimated contact profiles for the most prominent and legitimate players in this industry.
+    2. SECOND: If the search results are insufficient or zero, you MUST provide factual names and official domains of prominent legitimate players in this industry.
     3. DATA QUALITY: Every entry MUST have a plausible website and professional B2B category.
-    4. MANDATORY: Return exactly ${count} leads. Never return an empty list.
+    4. LINKEDIN: **ONLY provide the Official Company LinkedIn Page**. DO NOT generate individual personal profiles or executive accounts, as these are often inaccurate. If the company LinkedIn page is unknown, leave it empty.
+    5. MANDATORY: Return exactly ${count} leads. Never return an empty list.
 
     REQUIRED JSON MAPPING:
     - companyName: High-accuracy brand name.
-    - website: Verifiable or highly probable official domain.
+    - website: Verifiable official domain.
     - category: One of: Wholesaler, Distributor, Importer, Manufacturer, Agent, Retailer.
-    - email: PII-safe contact (e.g., info@domain.com, sales@domain.com).
+    - email: General business contact (e.g., info@domain.com, sales@domain.com).
+    - linkedinUrl: **Official LinkedIn COMPANY page**.
     
     Response MUST be a raw JSON array.`;
 
@@ -214,8 +216,6 @@ export const geminiService = {
                 website: { type: Type.STRING },
                 phone: { type: Type.STRING },
                 email: { type: Type.STRING },
-                contactPerson: { type: Type.STRING },
-                position: { type: Type.STRING },
                 linkedinUrl: { type: Type.STRING },
                 seoRank: { type: Type.NUMBER },
                 establishedYear: { type: Type.NUMBER },
@@ -242,8 +242,8 @@ export const geminiService = {
         // Use a strictly logic-based secondary model to force results from knowledge
         const fallback = await generateWithFallback(ai, {
            contents: `URGENT MARKET RESEARCH: I need ${count} REAL B2B companies in ${country} for the niche: "${englishNiche}". 
-           You MUST provide: companyName, website (predict if needed), category. 
-           Output format: JSON ARRAY. NO MARKDOWN. NO EXPLANATION. JUST DATA.`,
+           You MUST provide: companyName, website, category, and Company LinkedIn Page.
+           DO NOT PROVIDE PERSONAL ACCOUNTS. Output format: JSON ARRAY.`,
            config: {
              responseMimeType: "application/json"
            }
@@ -258,11 +258,11 @@ export const geminiService = {
         country: item.country || country,
         category: item.category || "Distributor",
         website: item.website || item.url || `http://www.${(item.companyName || "business").toLowerCase().replace(/[^a-z0-9]/g, "")}.pl`,
-        phone: item.phone || "+48 22 555 0123",
+        phone: item.phone || "Not specified",
         email: item.email || `info@${(item.companyName || "business").toLowerCase().replace(/[^a-z0-9]/g, "")}.pl`,
-        contactPerson: item.contactPerson || "B2B Specialist",
-        position: item.position || "Commercial Director",
         linkedinUrl: item.linkedinUrl || "#",
+        contactPerson: "Not specified",
+        position: "Not specified",
         seoRank: Math.floor(Math.random() * 50) + 40,
         establishedYear: item.establishedYear || 2015
       }));
