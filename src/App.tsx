@@ -181,6 +181,14 @@ export default function App() {
         setSearchState(prev => ({ ...prev, isSearching: false }));
         return;
       }
+
+      // Refresh DB leads before starting to ensure accurate deduplication
+      let activeDbLeads = dbLeads;
+      if (user) {
+        addLog("正在校验云端现有线索以防止重复...");
+        activeDbLeads = await dbService.fetchUserLeads(user.uid);
+        setDbLeads(activeDbLeads);
+      }
       
       console.log("Calling geminiService.generateKeywords");
       // Step 1: Multi-Platform Keyword Expansion
@@ -213,7 +221,7 @@ export default function App() {
       setSearchState(prev => ({ ...prev, progress: 85 }));
       addLog(`[第四步] 整理企业官方社交媒体及主页 (最后校验中)...`);
       
-      const existingCompanyNames = dbLeads.map(l => l.companyName);
+      const existingCompanyNames = activeDbLeads.map(l => l.companyName);
       const topSuggestions = [
         ...(keywords.google || []).slice(0, 3),
         ...(keywords.alibaba || []).slice(0, 3)
@@ -233,16 +241,34 @@ export default function App() {
       );
       
       console.log("Raw newLeads received in App:", newLeads);
-
+      
       if (!newLeads || !Array.isArray(newLeads) || newLeads.length === 0) {
-        // Force a small delay to make it feel like it tried hard
-        await new Promise(resolve => setTimeout(resolve, 1000));
         addLog("提示: 实时引擎未能在该利基市场捕捉到新线索，可能受限于当前地区的实时数据可见性。");
         setSearchState(prev => ({ ...prev, progress: 100, isSearching: false }));
         return;
       }
 
-      const formattedLeads: Lead[] = newLeads.map((l: any, i: number) => ({
+      const existingCompanyNamesSet = new Set(activeDbLeads.map(l => l.companyName.toLowerCase().trim()));
+      const existingWebsitesSet = new Set(activeDbLeads.map(l => l.website.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "").replace(/\/$/, "")));
+
+      const filteredLeads = newLeads.filter((l: any) => {
+        const name = (l.companyName || "").toLowerCase().trim();
+        const site = (l.website || "").toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "").replace(/\/$/, "");
+        
+        const isDuplicate = existingCompanyNamesSet.has(name) || (site && existingWebsitesSet.has(site));
+        if (isDuplicate) {
+          console.log(`Skipping duplicate lead: ${l.companyName} (${l.website})`);
+        }
+        return !isDuplicate;
+      });
+
+      if (filteredLeads.length === 0 && newLeads.length > 0) {
+        addLog("本次发现的所有线索均已在库中，已为您自动过滤重复项。");
+        setSearchState(prev => ({ ...prev, progress: 100, isSearching: false }));
+        return;
+      }
+
+      const formattedLeads: Lead[] = filteredLeads.map((l: any, i: number) => ({
         ...l,
         id: Math.random().toString(36).substr(2, 9),
         status: "New",
@@ -250,7 +276,7 @@ export default function App() {
         scrapedAt: new Date().toISOString()
       }));
 
-      addLog(`成功发现并核实 ${formattedLeads.length} 条高价值线索。`);
+      addLog(`成功发现并核实 ${formattedLeads.length} 条高价值新线索${newLeads.length > filteredLeads.length ? ` (过滤了 ${newLeads.length - filteredLeads.length} 条重复项)` : ""}。`);
       console.log("Setting leads state with:", formattedLeads.length, "items");
       
       // Save to Firebase if user is logged in

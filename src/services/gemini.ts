@@ -177,13 +177,15 @@ export const geminiService = {
     SEARCH CONTEXT:
     - Target: Distributors, Wholesalers, and Importers.
     - Keywords: ${suggestions}
+    - EXCLUDE THESE ALREADY SAVED COMPANIES: ${excludedCompanies.length > 0 ? excludedCompanies.join(", ") : "None"}
 
     GUIDELINES:
     1. FIRST: Use the googleSearch tool to locate ACTUAL websites and contact details of real companies currently operating in ${country}.
     2. SECOND: If the search results are insufficient or zero, you MUST provide factual names and official domains of prominent legitimate players in this industry.
-    3. DATA QUALITY: Every entry MUST have a plausible website and professional B2B category.
-    4. LINKEDIN: **ONLY provide the Official Company LinkedIn Page**. DO NOT generate individual personal profiles or executive accounts, as these are often inaccurate. If the company LinkedIn page is unknown, leave it empty.
-    5. MANDATORY: Return exactly ${count} leads. Never return an empty list.
+    3. DEDUPLICATION: DO NOT return any companies listed in the 'EXCLUDE' list above.
+    4. DATA QUALITY: Every entry MUST have a plausible website and professional B2B category.
+    5. LINKEDIN: **ONLY provide the Official Company LinkedIn Page**. DO NOT generate individual personal profiles or executive accounts, as these are often inaccurate. If the company LinkedIn page is unknown, leave it empty.
+    6. MANDATORY: Return exactly ${count} leads. Never return an empty list.
 
     REQUIRED JSON MAPPING:
     - companyName: High-accuracy brand name.
