@@ -20,7 +20,7 @@ export interface Lead {
   contactPerson: string;
   position: string;
   source: string;
-  status: "New" | "Contacted" | "Qualified" | "Disqualified";
+  status: "New" | "Contacted" | "Qualified" | "Disqualified" | "In CRM";
   rating?: number;
   nextFollowUp?: string;
   notes?: string;
@@ -28,6 +28,7 @@ export interface Lead {
   linkedinUrl?: string;
   seoRank?: number;
   establishedYear?: number;
+  specialty?: string;
 }
 
 export interface SearchState {

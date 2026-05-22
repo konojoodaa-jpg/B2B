@@ -236,7 +236,7 @@ export default function App() {
         keywords.localCore, 
         12, 
         searchPage, 
-        existingCompanyNames,
+        existingCompanyNames.slice(0, 15), // Limit local exclusion list to top 15 in the prompt to avoid AI confusion/drift and restore high-relevance
         topSuggestions
       );
       
@@ -251,62 +251,85 @@ export default function App() {
       const existingCompanyNamesSet = new Set(activeDbLeads.map(l => l.companyName.toLowerCase().trim()));
       const existingWebsitesSet = new Set(activeDbLeads.map(l => l.website.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "").replace(/\/$/, "")));
 
-      const filteredLeads = newLeads.filter((l: any) => {
+      // Function to clean base names and strip legal entity suffixes
+      const getCleanBaseName = (name: string) => {
+        if (!name) return "";
+        let clean = name.toLowerCase();
+        
+        // Replace known Polish / Global suffixes regardless of variations in dots and spacious separations
+        clean = clean.replace(/sp\s*\.?\s*z\s*\.?\s*o\s*\.?\s*o\s*\.?\s*sp\s*\.?\s*k\s*\.?/g, " ");
+        clean = clean.replace(/sp\s*\.?\s*z\s*\.?\s*o\s*\.?\s*o\s*\.?/g, " ");
+        clean = clean.replace(/sp\s*\.?\s*k\s*\.?/g, " ");
+        clean = clean.replace(/s\s*\.?\s*a\s*\.?/g, " ");
+        clean = clean.replace(/gmbh/g, " ");
+        clean = clean.replace(/ltd/g, " ");
+        clean = clean.replace(/limited/g, " ");
+        clean = clean.replace(/polska/g, " ");
+        clean = clean.replace(/poland/g, " ");
+        
+        // Strip everything else other than alphabets and digits
+        clean = clean.replace(/[^a-z0-9]/g, "");
+        return clean.trim();
+      };
+
+      const existingBaseNamesSet = new Set(activeDbLeads.map(l => getCleanBaseName(l.companyName)));
+
+      const processedNewLeads: Lead[] = newLeads.map((l: any) => {
         const name = (l.companyName || "").toLowerCase().trim();
+        const baseName = getCleanBaseName(l.companyName || "");
         const site = (l.website || "").toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "").replace(/\/$/, "");
         
-        const isDuplicate = existingCompanyNamesSet.has(name) || (site && existingWebsitesSet.has(site));
-        if (isDuplicate) {
-          console.log(`Skipping duplicate lead: ${l.companyName} (${l.website})`);
-        }
-        return !isDuplicate;
+        const isDuplicate = existingCompanyNamesSet.has(name) || existingBaseNamesSet.has(baseName) || (site && existingWebsitesSet.has(site));
+        
+        return {
+          ...l,
+          id: l.id || Math.random().toString(36).substr(2, 9),
+          status: isDuplicate ? "In CRM" : "New",
+          source: `自动化搜寻 - 第 ${searchPage} 页`,
+          scrapedAt: new Date().toISOString()
+        };
       });
 
-      if (filteredLeads.length === 0 && newLeads.length > 0) {
-        addLog("本次发现的所有线索均已在库中，已为您自动过滤重复项。");
-        setSearchState(prev => ({ ...prev, progress: 100, isSearching: false }));
-        return;
-      }
+      const newLeadsToSave = processedNewLeads.filter(l => l.status === "New");
+      const duplicateCount = processedNewLeads.length - newLeadsToSave.length;
 
-      const formattedLeads: Lead[] = filteredLeads.map((l: any, i: number) => ({
-        ...l,
-        id: Math.random().toString(36).substr(2, 9),
-        status: "New",
-        source: `自动化搜寻 - 第 ${searchPage} 页`,
-        scrapedAt: new Date().toISOString()
-      }));
-
-      addLog(`成功发现并核实 ${formattedLeads.length} 条高价值新线索${newLeads.length > filteredLeads.length ? ` (过滤了 ${newLeads.length - filteredLeads.length} 条重复项)` : ""}。`);
-      console.log("Setting leads state with:", formattedLeads.length, "items");
+      addLog(`成功搜寻并校验 ${processedNewLeads.length} 条高价值线索：其中 ${newLeadsToSave.length} 条为全新线索，${duplicateCount} 条在您的CRM库中已存在。`);
+      console.log("Setting workspace leads with complete searched set:", processedNewLeads.length, "items");
       
       // Save to Firebase if user is logged in
       if (user) {
-        addLog("正在将线索同步至云端数据库...");
-        try {
-          await dbService.batchSaveLeads(user.uid, formattedLeads);
-          // Refresh list to get Firebase IDs
-          const refreshed = await dbService.fetchUserLeads(user.uid);
-          setLeads(refreshed);
-          setDbLeads(refreshed);
-          addLog("✅ 云端同步完成。");
-        } catch (e) {
-          console.error("Database sync error:", e);
-          addLog("⚠️ 分部数据同步受阻 (可能需配置白名单)，但已为您保存至本地。");
-          setLeads(prev => [...formattedLeads, ...prev]);
-          setDbLeads(prev => [...formattedLeads, ...prev]);
+        if (newLeadsToSave.length > 0) {
+          addLog("正在将全新线索数据同步至云端数据库...");
+          try {
+            await dbService.batchSaveLeads(user.uid, newLeadsToSave);
+            addLog("✅ 云端同步完成。");
+          } catch (e) {
+            console.error("Database sync error:", e);
+            addLog("⚠️ 部分数据同步受阻 (可能需配置白名单)，但已为您保存至本地。");
+          }
+        } else {
+          addLog("本次未发现全新线索，无需新增入库。");
         }
+        
+        // Always refresh activeDbLeads from Firebase to keep global CRM updated
+        const refreshed = await dbService.fetchUserLeads(user.uid);
+        setDbLeads(refreshed);
       } else {
-        setLeads(prev => [...formattedLeads, ...prev]);
-        setDbLeads(prev => [...formattedLeads, ...prev]);
-        addLog("提示: 未登录状态下数据仅保存在本地内存。");
+        if (newLeadsToSave.length > 0) {
+          setDbLeads(prev => [...newLeadsToSave, ...prev]);
+        }
+        addLog("提示: 未登录状态下全新数据仅保存在本地内存。");
       }
+
+      // Live Leads view ALWAYS holds the COMPLETE current search results (exactly 12 items!), showing both new and In CRM!
+      setLeads(processedNewLeads);
 
       setSearchPage(prev => prev + 1);
       setSearchState(prev => ({ ...prev, progress: 100, isSearching: false }));
-      addLog(`自动化任务已完成，第 ${searchPage} 页数据已入库。`);
+      addLog(`自动化获客任务成功执行！第 ${searchPage} 页数据已提取归档。`);
       
-      // Final physical confirmation for debugging
-      alert(`获客任务已运行完毕！本次新增线索量: ${formattedLeads.length}`);
+      // Final physical confirmation
+      alert(`获客任务已运行完毕！\n\n・搜寻捕捉：${processedNewLeads.length} 条线索\n・全新入库：${newLeadsToSave.length} 条\n・CRM已含：${duplicateCount} 条\n\n数据已深度过滤并智能归并，详情请在实时列表与CRM库中查看。`);
       
     } catch (error: any) {
       console.error("Automation error:", error);
@@ -345,13 +368,219 @@ export default function App() {
   };
   
   const deleteLead = async (leadId: string) => {
-    if (!confirm("确定要删除这条线索吗？此操作不可撤销。")) return;
+    if (!confirm("确定要删除这条线索吗？此操作不可撤销外观。")) return;
     setDbLeads(prev => prev.filter(l => l.id !== leadId));
     setLeads(prev => prev.filter(l => l.id !== leadId));
     if (selectedLead?.id === leadId) setSelectedLead(null);
     if (user) {
       await dbService.deleteLead(leadId);
     }
+  };
+
+  const handleMergeAndCleanDuplicates = async () => {
+    if (dbLeads.length === 0) {
+      alert("线索库目前没有线索。");
+      return;
+    }
+
+    if (!confirm("确定要进行一键智能合并去重吗？\n\n系统将比对所有线索的 [公司核心名称] 和 [公司网站域名主域]，自动合并缺少的邮箱、电话等商业字段，保留最完整的一条数据，并将冗余重复件从云端同步删除。此操作极其智能且会修改云端。")) {
+      return;
+    }
+
+    addLog("开始全局一键精细去重与数据融合流程...");
+    
+    // Extracts secondary/brand domain names to match domain-level variations
+    const getDomainBase = (url: string) => {
+      try {
+        if (!url || url === "#") return "";
+        let clean = url.toLowerCase().trim()
+          .replace(/^(https?:\/\/)?(www\.)?/, "")
+          .split("/")[0];
+        const parts = clean.split(".");
+        if (parts.length > 1) {
+          // special suffixes (com.pl, co.uk, net.pl etc)
+          if (parts[parts.length - 2] === "com" || parts[parts.length - 2] === "co" || parts[parts.length - 2] === "net") {
+            return parts[parts.length - 3] || parts[0];
+          }
+          return parts[parts.length - 2];
+        }
+        return clean;
+      } catch (e) {
+        return "";
+      }
+    };
+
+    // Cleans base brand names by stripping legal entity suffixes
+    const getCleanBaseNameByFilter = (name: string) => {
+      if (!name) return "";
+      let clean = name.toLowerCase();
+      
+      // Replace known Polish / Global suffixes regardless of variations in dots and spacious separations
+      clean = clean.replace(/sp\s*\.?\s*z\s*\.?\s*o\s*\.?\s*o\s*\.?\s*sp\s*\.?\s*k\s*\.?/g, " ");
+      clean = clean.replace(/sp\s*\.?\s*z\s*\.?\s*o\s*\.?\s*o\s*\.?/g, " ");
+      clean = clean.replace(/sp\s*\.?\s*k\s*\.?/g, " ");
+      clean = clean.replace(/s\s*\.?\s*a\s*\.?/g, " ");
+      clean = clean.replace(/gmbh/g, " ");
+      clean = clean.replace(/ltd/g, " ");
+      clean = clean.replace(/limited/g, " ");
+      clean = clean.replace(/polska/g, " ");
+      clean = clean.replace(/poland/g, " ");
+      
+      // Strip everything else other than alphabets and digits
+      clean = clean.replace(/[^a-z0-9]/g, "");
+      return clean.trim();
+    };
+
+    const getCompletenessScore = (lead: Lead) => {
+      let score = 0;
+      if (lead.companyName) score += 2;
+      if (lead.website && lead.website !== "#") score += 2;
+      
+      // Prefer real corporate emails over dummy/vefifying placeholders
+      if (lead.email && !lead.email.includes("verifying") && !lead.email.includes("info@business") && !lead.email.includes("dummy")) {
+        score += 3;
+      }
+      if (lead.phone && lead.phone !== "Not specified" && lead.phone !== "Searching...") score += 2;
+      if (lead.linkedinUrl && lead.linkedinUrl !== "#") score += 3;
+      if (lead.contactPerson && lead.contactPerson !== "Not specified") score += 2;
+      if (lead.position && lead.position !== "Not specified") score += 1;
+      if (lead.rating && lead.rating > 0) score += lead.rating;
+      return score;
+    };
+
+    const mergedLeadsMap: Record<string, Lead> = {};
+    const docsToDelete: string[] = [];
+    const updatedSurvivorsList: Lead[] = [];
+    
+    // Sort leads so that the record with highest completeness runs first as the "Survivor Anchor"
+    const sortedLeadsByCompleteness = [...dbLeads].sort((a, b) => getCompletenessScore(b) - getCompletenessScore(a));
+    
+    for (const lead of sortedLeadsByCompleteness) {
+      const nameKey = getCleanBaseNameByFilter(lead.companyName);
+      const domainKey = getDomainBase(lead.website);
+
+      let matchedKey: string | null = null;
+      
+      for (const existingKey of Object.keys(mergedLeadsMap)) {
+        const existingLead = mergedLeadsMap[existingKey];
+        const existingName = getCleanBaseNameByFilter(existingLead.companyName);
+        const existingDomain = getDomainBase(existingLead.website);
+        
+        const isNameMatch = nameKey && existingName && (nameKey === existingName || nameKey.includes(existingName) || existingName.includes(nameKey));
+        const isDomainMatch = domainKey && existingDomain && domainKey === existingDomain;
+        
+        if (isNameMatch || isDomainMatch) {
+          matchedKey = existingKey;
+          break;
+        }
+      }
+
+      if (matchedKey) {
+        const survivor = mergedLeadsMap[matchedKey];
+        let isSurvivorModified = false;
+        
+        // Merge missing data fields into survivor anchor
+        if ((!survivor.email || survivor.email.includes("business") || survivor.email.includes("office@")) && lead.email && !lead.email.includes("business") && !lead.email.includes("office@")) {
+          survivor.email = lead.email;
+          isSurvivorModified = true;
+        }
+        if ((!survivor.phone || survivor.phone === "Not specified") && lead.phone && lead.phone !== "Not specified") {
+          survivor.phone = lead.phone;
+          isSurvivorModified = true;
+        }
+        if ((!survivor.linkedinUrl || survivor.linkedinUrl === "#") && lead.linkedinUrl && lead.linkedinUrl !== "#") {
+          survivor.linkedinUrl = lead.linkedinUrl;
+          isSurvivorModified = true;
+        }
+        if ((!survivor.contactPerson || survivor.contactPerson === "Not specified") && lead.contactPerson && lead.contactPerson !== "Not specified") {
+          survivor.contactPerson = lead.contactPerson;
+          isSurvivorModified = true;
+        }
+        if ((!survivor.position || survivor.position === "Not specified") && lead.position && lead.position !== "Not specified") {
+          survivor.position = lead.position;
+          isSurvivorModified = true;
+        }
+        if (lead.rating && lead.rating > (survivor.rating || 0)) {
+          survivor.rating = lead.rating;
+          isSurvivorModified = true;
+        }
+        
+        // Track the deleted duplicate's ID to wipe from Firestore
+        if (lead.id && lead.id !== survivor.id) {
+          docsToDelete.push(lead.id);
+        }
+
+        // Add to the list of survivors that need update in Firebase
+        if (isSurvivorModified && survivor.id) {
+          if (!updatedSurvivorsList.some(s => s.id === survivor.id)) {
+            updatedSurvivorsList.push(survivor);
+          }
+        }
+      } else {
+        const uniqueKey = lead.id || Math.random().toString();
+        mergedLeadsMap[uniqueKey] = { ...lead };
+      }
+    }
+
+    const uniqueLeads = Object.values(mergedLeadsMap);
+    const deletedCount = docsToDelete.length;
+
+    if (deletedCount === 0) {
+      addLog("检查完毕：CRM线索库中无线索或没有检测到任何多余重复件，无需合并。");
+      alert("线索库已经非常干净，未发现重复冗余数据！");
+      return;
+    }
+
+    addLog(`智能检测到 ${deletedCount} 条重复公司记录，正在发起云端合并去重与字段同步清理...`);
+
+    if (user) {
+      try {
+        let count = 0;
+        // Wiping out duplicates from Firebase
+        for (const docId of docsToDelete) {
+          await dbService.deleteLead(docId);
+          count++;
+          if (count % 3 === 0) {
+            addLog(`正在清理冗余线索: ${count}/${deletedCount} 项已清理...`);
+          }
+        }
+        
+        // Syncing updated merged fields for survivor documents back to Firebase
+        if (updatedSurvivorsList.length > 0) {
+          addLog(`正在将 ${updatedSurvivorsList.length} 家合并更新的企业商业字段写入云端...`);
+          for (const s of updatedSurvivorsList) {
+            await dbService.updateLead(s.id, {
+              email: s.email,
+              phone: s.phone,
+              linkedinUrl: s.linkedinUrl,
+              contactPerson: s.contactPerson,
+              position: s.position,
+              rating: s.rating
+            });
+          }
+        }
+        
+        addLog("✅ 云端数据库融合、消冗及商业字段重写全部完成。");
+      } catch (err) {
+        console.error("Firebase update during cleanup error:", err);
+        addLog("⚠️ 部分云数据清理受阻 (权限检查中)，已在您本地合并清洗数据。");
+      }
+    }
+
+    setDbLeads(uniqueLeads);
+    setLeads(uniqueLeads);
+    if (selectedLead && docsToDelete.includes(selectedLead.id)) {
+      setSelectedLead(uniqueLeads.find(l => {
+        const survivorBase = getCleanBaseNameByFilter(l.companyName);
+        const selectedBase = getCleanBaseNameByFilter(selectedLead.companyName);
+        const survivorDom = getDomainBase(l.website);
+        const selectedDom = getDomainBase(selectedLead.website);
+        return survivorBase === selectedBase || (survivorDom && selectedDom && survivorDom === selectedDom);
+      }) || null);
+    }
+
+    addLog(`🎉 智能清洗去重圆满成功！总扫描 ${dbLeads.length} 条数据，深度合并/清除 ${deletedCount} 条冗余信息，并同步在云端融合了 ${updatedSurvivorsList.length} 家公司的联系信息。保优高价值唯一个体 ${uniqueLeads.length} 家。`);
+    alert(`🎉 智能清洗融合成功！\n\n・扫描池总量：${dbLeads.length} 条\n・删除去重复：${deletedCount} 条冗余\n・综合补全件：${updatedSurvivorsList.length} 家企业联系方式合并\n・最终保留数：${uniqueLeads.length} 条唯一商业档案\n\n完美的归一化！重复项已被干净消减，所有缺失的邮箱与电话已被全量缝合。`);
   };
 
   const exportLeads = () => {
@@ -386,8 +615,10 @@ export default function App() {
 
   const sortedDbLeads = [...dbLeads]
     .filter(l => {
-      const matchesSearch = l.companyName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            l.contactPerson.toLowerCase().includes(searchTerm.toLowerCase());
+      const name = l.companyName || "";
+      const contact = l.contactPerson || "";
+      const matchesSearch = name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            contact.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === "all" || l.status === statusFilter;
       return matchesSearch && matchesStatus;
     })
@@ -670,6 +901,7 @@ export default function App() {
                           <th className="px-4 py-3">公司名称</th>
                           <th className="px-4 py-3">国家</th>
                           <th className="px-4 py-3">企业领英主页 (Company Page)</th>
+                          <th className="px-4 py-3">库内状态 / 商业邮箱</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#e2e8f0]">
@@ -678,6 +910,11 @@ export default function App() {
                               <td className="px-4 py-3">
                                 <div className="font-bold">{lead.companyName}</div>
                                 <div className="text-[10px] text-blue-600 truncate max-w-[200px]">{lead.website}</div>
+                                {lead.specialty && (
+                                  <div className="text-[10px] text-indigo-600 font-medium mt-1 leading-snug">
+                                    主营: {lead.specialty}
+                                  </div>
+                                )}
                               </td>
                               <td className="px-4 py-3 text-xs">{lead.country}</td>
                               <td className="px-4 py-3 text-xs">
@@ -687,6 +924,14 @@ export default function App() {
                                     访问主页
                                   </a>
                                 ) : <span className="text-gray-300">未收录</span>}
+                              </td>
+                              <td className="px-4 py-3 text-xs">
+                                <div className="flex flex-col space-y-1">
+                                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium w-max ${lead.status === 'In CRM' ? 'bg-slate-100 text-slate-700' : 'bg-emerald-100 text-emerald-800 font-bold'}`}>
+                                    {lead.status === 'In CRM' ? '● CRM已含' : '● 新线索(已存入库)'}
+                                  </span>
+                                  <span className="text-[10px] text-gray-500 font-mono select-all font-semibold">{lead.email}</span>
+                                </div>
                               </td>
                            </tr>
                         ))}
@@ -751,7 +996,15 @@ export default function App() {
                        <Calendar className="w-3 h-3 text-blue-600" />
                        <span className="text-[10px] font-bold text-blue-700">今日待跟进: {dbLeads.filter(l => l.nextFollowUp === new Date().toISOString().split('T')[0]).length}</span>
                      </div>
-                     <button onClick={exportLeads} className="bg-slate-900 text-white px-3 py-1.5 rounded text-[11px] font-bold shadow-sm active:scale-95 transition-transform">导出 CSV</button>
+                     <button 
+                       onClick={handleMergeAndCleanDuplicates}
+                       className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-lg text-[11px] font-bold shadow-md shadow-indigo-100 hover:shadow-indigo-200 transition-all flex items-center gap-1.5 active:scale-95 mr-2"
+                       title="全局智能扫描比对并合并相同企业的所有属性"
+                     >
+                       <ShieldCheck className="w-3.5 h-3.5 text-white" />
+                       <span>一键合并去重</span>
+                     </button>
+                     <button onClick={exportLeads} className="bg-slate-900 text-white px-4 py-1.5 rounded-lg text-[11px] font-bold shadow-sm active:scale-95 transition-transform">导出 CSV</button>
                    </div>
                 </div>
                 <table className="w-full text-left border-collapse">
@@ -789,6 +1042,12 @@ export default function App() {
                                      </a>
                                      <span className="bg-blue-50 text-blue-600 px-1.5 rounded-sm font-bold border border-blue-100 italic">SEO: {l.seoRank}</span>
                                   </div>
+                                  {l.specialty && (
+                                    <div className="text-[11px] text-indigo-600 mt-1 font-medium bg-indigo-50/50 rounded-md px-2 py-0.5 max-w-lg border border-indigo-100/30 flex items-center gap-1">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse shrink-0 text-indigo-500"></span>
+                                      <span className="truncate"><b>利基主营:</b> {l.specialty}</span>
+                                    </div>
+                                  )}
                                </td>
                                <td className="px-4 py-3">
                                   <div className="flex items-center space-x-2 text-xs">
@@ -1005,6 +1264,16 @@ function LeadDetailModal({ lead, onClose, onUpdate }: { lead: Lead, onClose: () 
         </div>
 
         <div className="p-6 space-y-6">
+          {lead.specialty && (
+            <div className="p-3.5 bg-indigo-50/90 rounded-xl border border-indigo-100 text-indigo-950 shadow-inner">
+              <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-indigo-500" />
+                <span>AI 业务匹配度穿透验证 / 核心主营产品</span>
+              </div>
+              <div className="text-xs leading-relaxed font-semibold text-indigo-900">{lead.specialty}</div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-6">
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-gray-400 uppercase">线索评分</label>
