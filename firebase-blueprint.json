@@ -33,7 +33,22 @@
         "establishedYear": { "type": "number" },
         "status": { "type": "string", "enum": ["New", "Contacted", "Interested", "Closed"] },
         "source": { "type": "string" },
-        "scrapedAt": { "type": "string", "format": "date-time" }
+        "scrapedAt": { "type": "string", "format": "date-time" },
+        "websiteStatus": { "type": "string" },
+        "companyType": { "type": "string" },
+        "mainBusinessSummary": { "type": "string" },
+        "relevantKeywordsFound": { "type": "array" },
+        "evidenceUrls": { "type": "array" },
+        "productLineStatus": { "type": "string" },
+        "videoLaryngoscopeFit": { "type": "number" },
+        "bronchoscopeFit": { "type": "number" },
+        "entEndoscopeFit": { "type": "number" },
+        "disposableScopeFit": { "type": "number" },
+        "recommendedProductToPitch": { "type": "string" },
+        "leadPriority": { "type": "string" },
+        "confidenceScore": { "type": "number" },
+        "nextAction": { "type": "string" },
+        "reason": { "type": "string" }
       },
       "required": ["userId", "companyName", "website", "scrapedAt"]
     }

@@ -29,6 +29,23 @@ export interface Lead {
   seoRank?: number;
   establishedYear?: number;
   specialty?: string;
+
+  // New Validation and Checklist Fields
+  websiteStatus?: "active" | "unreachable" | "parked" | "redirected" | "outdated" | "unknown";
+  companyType?: "specialized distributor" | "general medical webshop" | "emergency/rescue supplier" | "anesthesia/ICU distributor" | "endoscopy distributor" | "manufacturer/OEM" | "clinic/hospital/training center" | "consumer health brand" | "irrelevant/unknown";
+  mainBusinessSummary?: string;
+  relevantKeywordsFound?: string[];
+  evidenceUrls?: string[];
+  productLineStatus?: "active" | "weak evidence" | "possible historical" | "not found";
+  videoLaryngoscopeFit?: number; // 0-10
+  bronchoscopeFit?: number;       // 0-10
+  entEndoscopeFit?: number;       // 0-10
+  disposableScopeFit?: number;    // 0-10
+  recommendedProductToPitch?: string;
+  leadPriority?: "A" | "B" | "C" | "D";
+  confidenceScore?: number;       // 0-100 (percentage)
+  nextAction?: "email_now" | "find_person_on_linkedin" | "whatsapp_once" | "verify_first" | "skip";
+  reason?: string;
 }
 
 export interface SearchState {
