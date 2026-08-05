@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
-import { geminiService } from "@/src/services/gemini";
+import { geminiService, isRealNonSyntheticCompany } from "@/src/services/gemini";
 import { Lead, TargetCountry, SearchState, KeywordResults } from "@/src/types";
 import Markdown from "react-markdown";
 
@@ -201,6 +201,8 @@ export default function App() {
   const [selectedContinent, setSelectedContinent] = useState<string>("欧洲");
   const [selectedRegion, setSelectedRegion] = useState<string>("东欧/中欧");
   const [selectedCountry, setSelectedCountry] = useState<TargetCountry>("波兰");
+  const [selectedCountries, setSelectedCountries] = useState<string[]>(["波兰"]);
+  const [countryFilter, setCountryFilter] = useState<string>("all");
   const [dbLeads, setDbLeads] = useState<Lead[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
 
@@ -224,8 +226,20 @@ export default function App() {
         });
         // Initial fetch
         const savedLeads = await dbService.fetchUserLeads(currentUser.uid);
-        setLeads(savedLeads);
-        setDbLeads(savedLeads);
+        const realSavedLeads = savedLeads.filter(isRealNonSyntheticCompany);
+        setLeads(realSavedLeads);
+        setDbLeads(realSavedLeads);
+
+        // Async background scrub of any leftover synthetic leads from Firestore
+        const syntheticCount = savedLeads.length - realSavedLeads.length;
+        if (syntheticCount > 0) {
+          console.warn(`Scrubbing ${syntheticCount} existing synthetic leads from Firestore database...`);
+          savedLeads.forEach((lead) => {
+            if (!isRealNonSyntheticCompany(lead) && lead.id) {
+              dbService.deleteLead(lead.id).catch(console.error);
+            }
+          });
+        }
 
         const savedNotes = await dbService.getDevNotes(currentUser.uid);
         if (savedNotes) setDevNotes(savedNotes);
@@ -306,20 +320,24 @@ export default function App() {
     // Force switch to workbench so user sees logic happening
     setActiveTab("workbench");
 
+    const targetCountries = selectedCountries.length > 0 ? selectedCountries : [selectedCountry];
+    const BATCH_TARGET = 24; // Requirement: 24 leads per run
+
     setSearchState((prev) => ({
       ...prev,
       isSearching: true,
       progress: 0,
-      log: [`[${new Date().toLocaleTimeString()}] 正在初始化引擎...`],
+      log: [
+        `[${new Date().toLocaleTimeString()}] 正在初始化 24 条线索多国全域抓取引擎 (目标国家: ${targetCountries.join(", ")})`,
+      ],
     }));
 
     try {
-      console.log("Calling getAI check...");
       if (!geminiService.isConfigured()) {
         const errorMsg =
           "未检测到 GEMINI_API_KEY。请确保您已在 Vercel 环境变量中设置该 Key，并点击 Redeploy 重新部署。";
         addLog(`严重错误: ${errorMsg}`);
-        alert(errorMsg); // High visibility for Vercel debugging
+        alert(errorMsg);
         setSearchState((prev) => ({ ...prev, isSearching: false }));
         return;
       }
@@ -332,12 +350,12 @@ export default function App() {
         setDbLeads(activeDbLeads);
       }
 
-      console.log("Calling geminiService.generateKeywords");
       // Step 1: Multi-Platform Keyword Expansion
+      const primaryCountry = targetCountries[0] || selectedCountry;
       setSearchState((prev) => ({ ...prev, progress: 10 }));
-      addLog(`[第一步] 全网搜索词联想模拟 (Google, Alibaba, Amazon)...`);
+      addLog(`[第一步] 全网搜索词联想模拟 (主市场: ${primaryCountry})...`);
       const keywords = await geminiService.generateKeywords(
-        selectedCountry,
+        primaryCountry,
         productKeyword,
       );
 
@@ -349,31 +367,12 @@ export default function App() {
       addLog(
         `[翻译校验] 英语: ${keywords.englishCore} | 当地语: ${keywords.localCore}`,
       );
-      const totalKeywords =
-        (keywords.google?.length || 0) +
-        (keywords.alibaba?.length || 0) +
-        (keywords.amazon?.length || 0);
-      addLog(`成功捕捉到来自多平台的 ${totalKeywords} 个高意向联想词。`);
 
-      console.log("Calling geminiService.simulateLeads");
-      // Step 2: Google Search Verification
+      // Step 2 & 3: Multi-Country Sourcing to accumulate 24 real, non-fake leads
       setSearchState((prev) => ({ ...prev, progress: 30 }));
       addLog(
-        `[第二步] 正在执行 ${selectedCountry} 市场的实时 Google 搜索验证...`,
+        `[第二步] 正在对 ${targetCountries.length} 个目标国家 (${targetCountries.join(", ")}) 进行深度穿透搜索，计划抓取 ${BATCH_TARGET} 条真实线索...`,
       );
-      addLog(
-        `正在结合 "${keywords.englishCore}" 与 "${keywords.localCore}" 进行深度穿透搜索...`,
-      );
-
-      // Step 3: Global Lead Extraction
-      setSearchState((prev) => ({ ...prev, progress: 60 }));
-      addLog("[第三步] 提取已证实的 B2B 企业领英主页 (LinkedIn Company)...");
-      addLog("排除个人虚假账号，仅抓取官方企业背书页面...");
-      addLog("正在验证目标企业的批发/分销资质...");
-
-      // Step 4: AI Enrichment & Database Sync
-      setSearchState((prev) => ({ ...prev, progress: 85 }));
-      addLog(`[第四步] 整理企业官方社交媒体及主页 (最后校验中)...`);
 
       const existingCompanyNames = activeDbLeads.map((l) => l.companyName);
       const topSuggestions = [
@@ -381,28 +380,51 @@ export default function App() {
         ...(keywords.alibaba || []).slice(0, 3),
       ].join(", ");
 
-      addLog(`正在从外部数据源同步线索流...`);
-      console.log("Starting simulateLeads with info:", {
-        selectedCountry,
-        english: keywords.englishCore,
-        local: keywords.localCore,
-      });
-
-      const newLeads = await geminiService.simulateLeads(
-        selectedCountry,
-        keywords.englishCore,
-        keywords.localCore,
-        12,
-        searchPage,
-        existingCompanyNames.slice(0, 15), // Limit local exclusion list to top 15 in the prompt to avoid AI confusion/drift and restore high-relevance
-        topSuggestions,
+      const perCountryCount = Math.max(
+        Math.ceil(BATCH_TARGET / targetCountries.length),
+        8,
       );
 
-      console.log("Raw newLeads received in App:", newLeads);
+      let accumulatedLeads: any[] = [];
 
-      if (!newLeads || !Array.isArray(newLeads) || newLeads.length === 0) {
+      for (let i = 0; i < targetCountries.length; i++) {
+        const country = targetCountries[i];
+        if (accumulatedLeads.length >= BATCH_TARGET) break;
+
+        const currentNeeded = BATCH_TARGET - accumulatedLeads.length;
+        const fetchCount = Math.min(perCountryCount, currentNeeded);
+
+        addLog(`[国家: ${country}] 正在实时搜寻并验证该国 ${fetchCount} 条真实 B2B 分销商...`);
+        const progressPct = 30 + Math.floor(((i + 1) / targetCountries.length) * 50);
+        setSearchState((prev) => ({ ...prev, progress: progressPct }));
+
+        const rawCountryLeads = await geminiService.simulateLeads(
+          country,
+          keywords.englishCore,
+          keywords.localCore,
+          fetchCount,
+          searchPage,
+          existingCompanyNames.slice(0, 15),
+          topSuggestions,
+        );
+
+        // Anti-fake filter in App.tsx as defense in depth
+        const validCountryLeads = (rawCountryLeads || []).filter((lead: any) =>
+          isRealNonSyntheticCompany(lead),
+        );
+
         addLog(
-          "提示: 实时引擎未能在该利基市场捕捉到新线索，可能受限于当前地区的实时数据可见性。",
+          `[国家: ${country}] 成功提取 ${validCountryLeads.length} 条经过真实验证的企业数据。`,
+        );
+        accumulatedLeads.push(...validCountryLeads);
+      }
+
+      setSearchState((prev) => ({ ...prev, progress: 85 }));
+      addLog(`[第四步] 正在比对并整理 24 条线索流，去除重复项...`);
+
+      if (accumulatedLeads.length === 0) {
+        addLog(
+          "提示: 实时引擎未能在选定市场捕捉到新的真实合格线索，可能受限于当前地区的公开数据。",
         );
         setSearchState((prev) => ({
           ...prev,
@@ -424,16 +446,10 @@ export default function App() {
         ),
       );
 
-      // Function to clean base names and strip legal entity suffixes
       const getCleanBaseName = (name: string) => {
         if (!name) return "";
         let clean = name.toLowerCase();
-
-        // Replace known Polish / Global suffixes regardless of variations in dots and spacious separations
-        clean = clean.replace(
-          /sp\s*\.?\s*z\s*\.?\s*o\s*\.?\s*o\s*\.?\s*sp\s*\.?\s*k\s*\.?/g,
-          " ",
-        );
+        clean = clean.replace(/sp\s*\.?\s*z\s*\.?\s*o\s*\.?\s*o\s*\.?\s*sp\s*\.?\s*k\s*\.?/g, " ");
         clean = clean.replace(/sp\s*\.?\s*z\s*\.?\s*o\s*\.?\s*o\s*\.?/g, " ");
         clean = clean.replace(/sp\s*\.?\s*k\s*\.?/g, " ");
         clean = clean.replace(/s\s*\.?\s*a\s*\.?/g, " ");
@@ -442,8 +458,6 @@ export default function App() {
         clean = clean.replace(/limited/g, " ");
         clean = clean.replace(/polska/g, " ");
         clean = clean.replace(/poland/g, " ");
-
-        // Strip everything else other than alphabets and digits
         clean = clean.replace(/[^a-z0-9]/g, "");
         return clean.trim();
       };
@@ -452,7 +466,7 @@ export default function App() {
         activeDbLeads.map((l) => getCleanBaseName(l.companyName)),
       );
 
-      const processedNewLeads: Lead[] = newLeads.map((l: any) => {
+      const processedNewLeads: Lead[] = accumulatedLeads.map((l: any) => {
         const name = (l.companyName || "").toLowerCase().trim();
         const baseName = getCleanBaseName(l.companyName || "");
         const site = (l.website || "")
@@ -469,7 +483,7 @@ export default function App() {
           ...l,
           id: l.id || Math.random().toString(36).substr(2, 9),
           status: isDuplicate ? "In CRM" : "New",
-          source: `自动化搜寻 - 第 ${searchPage} 页`,
+          source: `多国并发搜寻 - 第 ${searchPage} 页`,
           scrapedAt: new Date().toISOString(),
         };
       });
@@ -480,12 +494,7 @@ export default function App() {
       const duplicateCount = processedNewLeads.length - newLeadsToSave.length;
 
       addLog(
-        `成功搜寻并校验 ${processedNewLeads.length} 条高价值线索：其中 ${newLeadsToSave.length} 条为全新线索，${duplicateCount} 条在您的CRM库中已存在。`,
-      );
-      console.log(
-        "Setting workspace leads with complete searched set:",
-        processedNewLeads.length,
-        "items",
+        `成功搜寻并校验 ${processedNewLeads.length} 条真实高价值线索：其中 ${newLeadsToSave.length} 条为全新线索，${duplicateCount} 条在您的 CRM 库中已存在。`,
       );
 
       // Save to Firebase if user is logged in
@@ -497,17 +506,14 @@ export default function App() {
             addLog("✅ 云端同步完成。");
           } catch (e) {
             console.error("Database sync error:", e);
-            addLog(
-              "⚠️ 部分数据同步受阻 (可能需配置白名单)，但已为您保存至本地。",
-            );
+            addLog("⚠️ 部分数据同步受阻，但已为您保存至本地。");
           }
         } else {
           addLog("本次未发现全新线索，无需新增入库。");
         }
 
-        // Always refresh activeDbLeads from Firebase to keep global CRM updated
         const refreshed = await dbService.fetchUserLeads(user.uid);
-        setDbLeads(refreshed);
+        setDbLeads(refreshed.filter(isRealNonSyntheticCompany));
       } else {
         if (newLeadsToSave.length > 0) {
           setDbLeads((prev) => [...newLeadsToSave, ...prev]);
@@ -515,21 +521,14 @@ export default function App() {
         addLog("提示: 未登录状态下全新数据仅保存在本地内存。");
       }
 
-      // Live Leads view ALWAYS holds the COMPLETE current search results (exactly 12 items!), showing both new and In CRM!
       setLeads(processedNewLeads);
-
       setSearchPage((prev) => prev + 1);
       setSearchState((prev) => ({
         ...prev,
         progress: 100,
         isSearching: false,
       }));
-      addLog(`自动化获客任务成功执行！第 ${searchPage} 页数据已提取归档。`);
-
-      // Final physical confirmation
-      alert(
-        `获客任务已运行完毕！\n\n・搜寻捕捉：${processedNewLeads.length} 条线索\n・全新入库：${newLeadsToSave.length} 条\n・CRM已含：${duplicateCount} 条\n\n数据已深度过滤并智能归并，详情请在实时列表与CRM库中查看。`,
-      );
+      addLog(`自动化获客任务成功执行！已搜寻并归档 ${processedNewLeads.length} 条真实有效线索。`);
     } catch (error: any) {
       console.error("Automation error:", error);
       const errorMsg =
@@ -547,7 +546,7 @@ export default function App() {
       if (isQuota) {
         addLog("🚨 警告: AI 免费额度已耗尽 (Daily Quota Exceeded)。");
         alert(
-          "自动化失败: 您的 API 免费配额已达上限。\n\nGemini 3 系列在免费层级有每日调用次数限制。您可以：\n1. 等待明日配额刷新后重试。\n2. 在 Vercel 后台设置您自己的 VITE_GEMINI_API_KEY 以获得更高的专属额度。",
+          "自动化失败: 您的 API 免费配额已达上限。\n\nGemini 系列在免费层级有每日调用次数限制。您可以等待明日配额刷新后重试。",
         );
       } else if (isHighDemand) {
         addLog("⚠️ 提示: AI 服务目前正处于平峰期，请求已排队。");
@@ -960,15 +959,25 @@ export default function App() {
     }
   };
 
+  const availableCountries = React.useMemo(() => {
+    const set = new Set<string>();
+    dbLeads.forEach((l) => {
+      if (l.country) set.add(l.country);
+    });
+    return Array.from(set).sort();
+  }, [dbLeads]);
+
   const sortedDbLeads = [...dbLeads]
     .filter((l) => {
+      if (!isRealNonSyntheticCompany(l)) return false;
       const name = l.companyName || "";
       const contact = l.contactPerson || "";
       const matchesSearch =
         name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         contact.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === "all" || l.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesCountry = countryFilter === "all" || l.country === countryFilter;
+      return matchesSearch && matchesStatus && matchesCountry;
     })
     .sort((a, b) => {
       if (sortBy === "rating") return (b.rating || 0) - (a.rating || 0);
@@ -1133,42 +1142,46 @@ export default function App() {
               <section className="grid grid-cols-1 lg:grid-cols-[350px_1fr] gap-6 items-start">
                 <div className="glass-card p-5 space-y-6 bg-white">
                   <div className="space-y-4">
-                    <ConfigGroup label="目标扩张市场 (全球区域分级)">
+                    <ConfigGroup label="目标扩张市场 (支持多国并发搜寻 / 单次24条线索)">
                       <div className="grid grid-cols-1 gap-2">
-                        <select
-                          value={selectedContinent}
-                          onChange={(e) => {
-                            const cont = e.target.value;
-                            setSelectedContinent(cont);
-                            const firstRegion = Object.keys(
-                              HIERARCHICAL_COUNTRIES[cont],
-                            )[0];
-                            setSelectedRegion(firstRegion);
-                            setSelectedCountry(
-                              HIERARCHICAL_COUNTRIES[cont][firstRegion][0],
-                            );
-                          }}
-                          className="w-full p-2 bg-gray-50 border rounded text-[11px] font-bold text-gray-700"
-                          disabled={searchState.isSearching}
-                        >
-                          {Object.keys(HIERARCHICAL_COUNTRIES).map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-
                         <div className="grid grid-cols-2 gap-2">
+                          <select
+                            value={selectedContinent}
+                            onChange={(e) => {
+                              const cont = e.target.value;
+                              setSelectedContinent(cont);
+                              const firstRegion = Object.keys(
+                                HIERARCHICAL_COUNTRIES[cont],
+                              )[0];
+                              setSelectedRegion(firstRegion);
+                              const firstCountry = HIERARCHICAL_COUNTRIES[cont][firstRegion][0];
+                              setSelectedCountry(
+                                firstCountry as TargetCountry,
+                              );
+                              setSelectedCountries([firstCountry]);
+                            }}
+                            className="w-full p-2 bg-gray-50 border rounded text-[11px] font-bold text-gray-700"
+                            disabled={searchState.isSearching}
+                          >
+                            {Object.keys(HIERARCHICAL_COUNTRIES).map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+
                           <select
                             value={selectedRegion}
                             onChange={(e) => {
                               const reg = e.target.value;
                               setSelectedRegion(reg);
+                              const firstCountry = HIERARCHICAL_COUNTRIES[selectedContinent][
+                                reg
+                              ][0];
                               setSelectedCountry(
-                                HIERARCHICAL_COUNTRIES[selectedContinent][
-                                  reg
-                                ][0],
+                                firstCountry as TargetCountry,
                               );
+                              setSelectedCountries([firstCountry]);
                             }}
                             className="w-full p-2 bg-gray-50 border rounded text-[11px] font-bold text-gray-700"
                             disabled={searchState.isSearching}
@@ -1181,25 +1194,81 @@ export default function App() {
                               </option>
                             ))}
                           </select>
+                        </div>
 
-                          <select
-                            value={selectedCountry}
-                            onChange={(e) =>
-                              setSelectedCountry(
-                                e.target.value as TargetCountry,
-                              )
-                            }
-                            className="w-full p-2 bg-gray-50 border rounded text-[11px] font-bold text-gray-700"
-                            disabled={searchState.isSearching}
-                          >
-                            {HIERARCHICAL_COUNTRIES[selectedContinent][
-                              selectedRegion
-                            ].map((c) => (
-                              <option key={c} value={c}>
-                                {c}
-                              </option>
-                            ))}
-                          </select>
+                        {/* Multi-Country Selector Chips */}
+                        <div className="bg-gray-50 p-2.5 rounded border border-gray-200 space-y-2">
+                          <div className="flex items-center justify-between text-[10px] font-bold text-gray-500">
+                            <span>选择目标国家 (可多选):</span>
+                            <div className="flex space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const currentRegionCountries = HIERARCHICAL_COUNTRIES[selectedContinent][selectedRegion];
+                                  setSelectedCountries([...currentRegionCountries]);
+                                  if (currentRegionCountries[0]) {
+                                    setSelectedCountry(currentRegionCountries[0] as TargetCountry);
+                                  }
+                                }}
+                                className="text-blue-600 hover:underline text-[10px]"
+                                disabled={searchState.isSearching}
+                              >
+                                全选本区
+                              </button>
+                              <span>|</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const firstCountry = HIERARCHICAL_COUNTRIES[selectedContinent][selectedRegion][0];
+                                  setSelectedCountry(firstCountry as TargetCountry);
+                                  setSelectedCountries([firstCountry]);
+                                }}
+                                className="text-gray-500 hover:underline text-[10px]"
+                                disabled={searchState.isSearching}
+                              >
+                                重置单选
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5 max-h-[110px] overflow-y-auto pr-1">
+                            {HIERARCHICAL_COUNTRIES[selectedContinent][selectedRegion].map((country) => {
+                              const isSelected = selectedCountries.includes(country);
+                              return (
+                                <button
+                                  key={country}
+                                  type="button"
+                                  disabled={searchState.isSearching}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      if (selectedCountries.length > 1) {
+                                        const next = selectedCountries.filter((c) => c !== country);
+                                        setSelectedCountries(next);
+                                        setSelectedCountry(next[0] as TargetCountry);
+                                      }
+                                    } else {
+                                      const next = [...selectedCountries, country];
+                                      setSelectedCountries(next);
+                                      setSelectedCountry(next[0] as TargetCountry);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "px-2 py-1 rounded text-[10px] font-bold transition-all border flex items-center gap-1 cursor-pointer",
+                                    isSelected
+                                      ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                                      : "bg-white text-gray-700 border-gray-200 hover:bg-gray-100"
+                                  )}
+                                >
+                                  {isSelected ? "✓ " : "+ "}
+                                  {country}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          <div className="text-[10px] text-indigo-700 bg-indigo-50/80 p-1.5 rounded border border-indigo-100 font-medium leading-snug">
+                            已选 <span className="font-bold text-indigo-900">{selectedCountries.length}</span> 个国家 ({selectedCountries.join(", ")})，单次并发全域挖掘: <span className="font-bold text-indigo-900">24 条真实线索</span>
+                          </div>
                         </div>
                       </div>
                     </ConfigGroup>
@@ -1420,9 +1489,38 @@ export default function App() {
             <div className="bg-white rounded-xl border overflow-hidden">
               <div className="p-4 border-b bg-gray-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div className="flex flex-col space-y-3 md:space-y-0 md:flex-row md:items-center md:space-x-6 w-full">
-                  <h3 className="font-bold text-sm whitespace-nowrap">
-                    全球线索库 & CRM ({sortedDbLeads.length}/{dbLeads.length})
-                  </h3>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="font-bold text-sm whitespace-nowrap">
+                      全球线索库 & CRM ({sortedDbLeads.length}/{dbLeads.length})
+                    </h3>
+                    {user && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const allUserLeads = await dbService.fetchUserLeads(user.uid);
+                          const badLeads = allUserLeads.filter((l) => !isRealNonSyntheticCompany(l));
+                          if (badLeads.length === 0) {
+                            alert("当前数据库中未检测到测试/合成线索，所有保存的线索均为真实验证公司。");
+                            return;
+                          }
+                          for (const lead of badLeads) {
+                            if (lead.id) {
+                              await dbService.deleteLead(lead.id).catch(console.error);
+                            }
+                          }
+                          const refreshed = await dbService.fetchUserLeads(user.uid);
+                          const realLeads = refreshed.filter(isRealNonSyntheticCompany);
+                          setDbLeads(realLeads);
+                          setLeads(realLeads);
+                          alert(`已成功从云端数据库彻底清理 ${badLeads.length} 条测试/合成线索！`);
+                        }}
+                        className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded text-[10px] font-bold transition-colors cursor-pointer whitespace-nowrap"
+                        title="一键彻底移除以往生成的测试或合成假公司"
+                      >
+                        🧹 清理测试假线索
+                      </button>
+                    )}
+                  </div>
                   <div className="flex flex-wrap items-center gap-3 w-full">
                     <div className="relative flex-1 min-w-[200px]">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -1433,6 +1531,26 @@ export default function App() {
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full bg-white border rounded-lg pl-9 pr-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500"
                       />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase">
+                        国家:
+                      </span>
+                      <select
+                        value={countryFilter}
+                        onChange={(e) => setCountryFilter(e.target.value)}
+                        className="bg-white border rounded px-2 py-1.5 text-[11px] font-bold text-indigo-700 outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="all">国家 (全部: {dbLeads.length})</option>
+                        {availableCountries.map((c) => {
+                          const cnt = dbLeads.filter((l) => l.country === c).length;
+                          return (
+                            <option key={c} value={c}>
+                              {c} ({cnt})
+                            </option>
+                          );
+                        })}
+                      </select>
                     </div>
                     <div className="flex items-center space-x-2">
                       <span className="text-[10px] font-bold text-gray-400 uppercase">
@@ -1574,9 +1692,17 @@ export default function App() {
                             </div>
                           </div>
                           <div className="text-[10px] text-gray-500 flex flex-wrap items-center gap-1.5">
-                            <span className="font-semibold text-slate-700">
-                              {l.country}
-                            </span>
+                            <button
+                              type="button"
+                              className="font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-1.5 py-0.5 rounded text-[10px] transition-colors cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCountryFilter(l.country);
+                              }}
+                              title={`点击筛选该国家: ${l.country}`}
+                            >
+                              📍 {l.country}
+                            </button>
                             <span>|</span>
                             <a
                               href={

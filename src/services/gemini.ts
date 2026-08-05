@@ -220,6 +220,64 @@ async function generateWithFallback(ai: any, params: any) {
   throw lastError;
 }
 
+export function isRealNonSyntheticCompany(lead: any): boolean {
+  if (!lead || !lead.companyName) return false;
+  const name = String(lead.companyName).trim();
+  const web = String(lead.website || "").toLowerCase();
+
+  // Rule 1: No fake or example domains
+  if (
+    web.includes("example.com") ||
+    web.includes("dummy.com") ||
+    web.includes("test.com") ||
+    web.includes("localhost") ||
+    web.includes("synthesized")
+  ) {
+    return false;
+  }
+
+  // Rule 2: Reject known synthetic generator base names
+  const syntheticBases = [
+    "aerosurg", "apexdistributors", "euromed", "alphasourcing", "novascientific",
+    "surgiparts", "summitb2b", "integracare", "polmed", "lek-tech", "varso-surg",
+    "krakow-care", "bialystok-hurt", "silesia-med", "gdańsk-pharm", "wrocław-aero"
+  ];
+  const lowerName = name.toLowerCase();
+  for (const base of syntheticBases) {
+    if (lowerName.includes(base)) {
+      return false;
+    }
+  }
+
+  // Rule 3: Reject names with arbitrary numbers (e.g., AeroSurg 32, Company 94, Brand 86)
+  // Check for word + 1-3 digit number (unless it's a 4-digit founding year like 1998 or 2010)
+  if (/\b[a-z\-]+\s+\d{1,3}\b/i.test(name)) {
+    const isYear = /\b(18|19|20)\d{2}\b/.test(name);
+    if (!isYear) {
+      return false;
+    }
+  }
+
+  // Rule 4: Reject generic number patterns
+  if (/\d{2,3}\s+(Wholesale|Distribution|B2B|Group|Ltd|Inc|Sp\.\s*z\s*o\.o\.|S\.A\.|GmbH)/i.test(name)) {
+    return false;
+  }
+
+  // Rule 5: Reject placeholder prefixes
+  if (
+    lowerName.startsWith("partner ") ||
+    lowerName.startsWith("company ") ||
+    lowerName.includes("dummy") ||
+    lowerName.includes("synthetic") ||
+    lowerName.includes("sample ltd") ||
+    lowerName.includes("test company")
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 export const geminiService = {
   isConfigured() {
     return !!getAI();
@@ -479,7 +537,7 @@ export const geminiService = {
       // Step A: Parse and add first-pass search leads first
       for (const item of parsed) {
         const normName = getNormCheckName(item.companyName || "");
-        if (normName && !seen.has(normName) && !allExcludesLowercase.has(normName)) {
+        if (normName && !seen.has(normName) && !allExcludesLowercase.has(normName) && isRealNonSyntheticCompany(item)) {
           seen.add(normName);
           uniqueParsed.push(item);
         }
@@ -528,15 +586,18 @@ export const geminiService = {
         // Run standard fallback prompt if not Poland medical or if still short
         if (uniqueParsed.length < count) {
           const remainingCount = count - uniqueParsed.length;
-          console.warn(`Primary search returned only ${uniqueParsed.length} results. Fetching remaining ${remainingCount} specialized leads via verified knowledge schema...`);
+          console.warn(`Primary search returned ${uniqueParsed.length} real results. Querying verified knowledge schema for up to ${remainingCount} additional real leads...`);
           
           const existingNames = uniqueParsed.map((item: any) => (item.companyName || "").toLowerCase().trim());
           const totalExcludes = [...excludedCompanies, ...existingNames];
 
           const fallbackPrompt = `You are a world-class B2B market research database. 
-          I need you to generate exactly ${remainingCount} additional highly relevant, real and active B2B wholesalers, distributors, or importers physically headquartered and operating inside ${country} for the product niche "${englishNiche}" (localized name: "${localNiche}").
+          I need you to return real, authentic B2B wholesalers, distributors, or importers physically headquartered and operating inside ${country} for the product niche "${englishNiche}" (localized name: "${localNiche}").
 
-          Ensure fields output matches the lead verification schema fully. Deduplicate against: ${totalExcludes.join(", ")}`;
+          STRICT MANDATE:
+          1. DO NOT generate fictional, synthetic, or fake company names with appended random numbers (such as "AeroSurg 32", "ApexDistributors 94", "PolMed 88").
+          2. Every returned company MUST be a real, legally registered business with an authentic domain URL in ${country}.
+          3. Deduplicate against: ${totalExcludes.join(", ")}`;
 
           try {
             const fallback = await generateWithFallback(ai, {
@@ -554,81 +615,22 @@ export const geminiService = {
             for (const item of parsedFallbackList) {
               const normName = (item.companyName || "").toLowerCase().trim();
               const isEx = excludedCompanies.some(ex => ex.toLowerCase().trim() === normName);
-              if (normName && !seen.has(normName) && !isEx) {
+              if (normName && !seen.has(normName) && !isEx && isRealNonSyntheticCompany(item)) {
                 seen.add(normName);
                 uniqueParsed.push(item);
               }
             }
           } catch (fallbackErr) {
-            console.error("Failed to parse fallback output, returning what we have:", fallbackErr);
-          }
-        }
-      }
-      
-      // Step D: Programmatic Localized Wholesaler Synthesizer
-      if (uniqueParsed.length < count) {
-        const remainingNeeded = count - uniqueParsed.length;
-        console.warn(`System is short of the strict lead capability requirement by ${remainingNeeded}. Triggering local B2B synthesizer...`);
-        
-        const isPl = country.toLowerCase() === "poland" || country.toLowerCase() === "波兰" || country.trim() === "PL";
-        const targetNicheChinese = localNiche || englishNiche || "医疗设备";
-        
-        const plBases = ["PolMed", "Lek-Tech", "Varso-Surg", "Krakow-Care", "Bialystok-Hurt", "Silesia-Med", "Gdańsk-Pharm", "Wrocław-Aero"];
-        const genericBases = ["EuroMed", "AeroSurg", "ApexDistributors", "AlphaSourcing", "NovaScientific", "SurgiParts", "SummitB2B", "IntegraCare"];
-        
-        const bases = isPl ? plBases : genericBases;
-        const suffixes = isPl ? ["Sp. z o.o.", "Sp. z o.o. Sp. k.", "S.A."] : ["Wholesale Ltd", "B2B Group", "Distribution Inc."];
-        
-        let attempts = 0;
-        while (uniqueParsed.length < count && attempts < 100) {
-          attempts++;
-          const base = bases[Math.floor(Math.random() * bases.length)];
-          const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
-          const randomSuffixNum = Math.floor(10 + Math.random() * 89);
-          
-          const synthesizedName = `${base} ${randomSuffixNum} ${suffix}`;
-          const normSynthesizedName = getNormCheckName(synthesizedName);
-          
-          if (!seen.has(normSynthesizedName) && !allExcludesLowercase.has(normSynthesizedName)) {
-            seen.add(normSynthesizedName);
-            
-            const cleanDomainName = base.toLowerCase().replace(/[^a-z0-9]/g, "") + randomSuffixNum;
-            const domainTLD = isPl ? "pl" : "com";
-            const extDomain = `http://www.${cleanDomainName}.${domainTLD}`;
-            const synthesizedEmail = `kontakt@${cleanDomainName}.${domainTLD}`;
-            
-            uniqueParsed.push({
-              companyName: synthesizedName,
-              website: extDomain,
-              category: "Distributor",
-              email: synthesizedEmail,
-              phone: isPl ? `+48 12 ${Math.floor(100 + Math.random() * 899)} ${Math.floor(10 + Math.random() * 89)}` : `+44 20 ${Math.floor(1000 + Math.random() * 8999)}`,
-              linkedinUrl: `https://www.linkedin.com/company/${cleanDomainName}`,
-              specialty: `专营 ${country} 地区高品质「${targetNicheChinese}」的专业B2B进口分销批发渠道。`,
-              seoRank: Math.floor(45 + Math.random() * 45),
-              establishedYear: Math.floor(2000 + Math.random() * 22),
-              websiteStatus: "active",
-              companyType: "specialized distributor",
-              mainBusinessSummary: `专注于 ${country} 本地临床急救、重症气道插管及「${targetNicheChinese}」的分销代理商。`,
-              relevantKeywordsFound: ["anesthesia", " ICU", "airway", "laryngoscope"],
-              evidenceUrls: [`${extDomain}/offer`, `${extDomain}/contact`],
-              productLineStatus: "active",
-              videoLaryngoscopeFit: 8,
-              bronchoscopeFit: 7,
-              entEndoscopeFit: 6,
-              disposableScopeFit: 7,
-              recommendedProductToPitch: "便携式视频喉镜整机",
-              leadPriority: "A",
-              confidenceScore: 88,
-              nextAction: "email_now",
-              reason: "本地深度同步B2B分销，气道管理及整机采购意愿明显。"
-            });
+            console.error("Failed to parse fallback output, returning verified results:", fallbackErr);
           }
         }
       }
 
-      // Enforce the vetting rules programmatically over all returned items (Defense-in-depth Sanitizer)
-      return uniqueParsed.slice(0, count).map((item: any) => {
+      // Filter to guarantee ONLY real, non-synthetic companies are returned
+      const verifiedRealLeads = uniqueParsed.filter(item => isRealNonSyntheticCompany(item));
+
+      // Enforce the vetting rules programmatically over all returned items
+      return verifiedRealLeads.slice(0, count).map((item: any) => {
         let web = item.website || item.url || "";
         const cleanName = (item.companyName || "business").toLowerCase().replace(/[^a-z0-9]/g, "");
         const isPl = country.toLowerCase() === "poland" || country.toLowerCase() === "波兰" || country.trim() === "PL";

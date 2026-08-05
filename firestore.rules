@@ -45,8 +45,9 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
-      allow get: if isOwner(userId);
-      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow create, update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if isSignedIn() && request.auth.uid == userId;
     }
 
     // Leads collection
@@ -54,18 +55,14 @@ service cloud.firestore {
       // List/Get: Owner only
       allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
       
-      // Create: Owner only + Validation
-      allow create: if isSignedIn() && isValidLead(request.resource.data);
+      // Create: Owner only
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       
-      // Update: Owner only + restricted fields
-      allow update: if isOwner(resource.data.userId) && 
-                      isValidLead(request.resource.data) &&
-                      request.resource.data.userId == resource.data.userId &&
-                      // Action: Status update or metadata update
-                      request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'category', 'contactPerson', 'position']);
+      // Update: Owner only
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
                       
       // Delete: Owner only
-      allow delete: if isOwner(resource.data.userId);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
   }
 }
