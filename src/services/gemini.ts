@@ -368,6 +368,12 @@ export const geminiService = {
     const prompt = `You are a world-class market researcher specializing in medical device, technical, scientific, and industrial B2B sourcing. 
     I need to find REAL, ACTIVE B2B distributors, wholesalers, or manufacturers that specifically distribute, manufacture, or import "${englishNiche}" (local name: "${localNiche}") in ${country}.
 
+    CRITICAL QUANTITY MANDATE:
+    - You MUST return AT LEAST ${count} DISTINCT, REAL, ACTIVE B2B companies in your output array.
+    - Do NOT stop after 4 or 5 companies. Conduct thorough search queries to discover and return at least ${count} unique real businesses operating in ${country}.
+    - Search query batch index page: ${page}.
+    - Deduplicate against these known companies: ${excludedCompanies.slice(0, 20).join(", ")}.
+
     CRITICAL COUNTRY BOUNDARY RULE:
     - Every single returned company MUST have a real, physical, or legally registered business operation in ${country}.
     - DO NOT return companies located solely in neighboring or distant countries unless they have a clear localized operational context.
@@ -595,9 +601,10 @@ export const geminiService = {
           I need you to return real, authentic B2B wholesalers, distributors, or importers physically headquartered and operating inside ${country} for the product niche "${englishNiche}" (localized name: "${localNiche}").
 
           STRICT MANDATE:
-          1. DO NOT generate fictional, synthetic, or fake company names with appended random numbers (such as "AeroSurg 32", "ApexDistributors 94", "PolMed 88").
-          2. Every returned company MUST be a real, legally registered business with an authentic domain URL in ${country}.
-          3. Deduplicate against: ${totalExcludes.join(", ")}`;
+          1. Return AT LEAST ${remainingCount} additional distinct, real B2B companies in your output array.
+          2. DO NOT generate fictional, synthetic, or fake company names with appended random numbers (such as "AeroSurg 32", "ApexDistributors 94", "PolMed 88").
+          3. Every returned company MUST be a real, legally registered business with an authentic domain URL in ${country}.
+          4. Deduplicate against: ${totalExcludes.join(", ")}`;
 
           try {
             const fallback = await generateWithFallback(ai, {

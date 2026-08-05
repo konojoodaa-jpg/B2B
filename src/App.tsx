@@ -382,7 +382,7 @@ export default function App() {
 
       const perCountryCount = Math.max(
         Math.ceil(BATCH_TARGET / targetCountries.length),
-        8,
+        12,
       );
 
       let accumulatedLeads: any[] = [];
@@ -391,32 +391,44 @@ export default function App() {
         const country = targetCountries[i];
         if (accumulatedLeads.length >= BATCH_TARGET) break;
 
-        const currentNeeded = BATCH_TARGET - accumulatedLeads.length;
-        const fetchCount = Math.min(perCountryCount, currentNeeded);
+        let countryPass = 0;
+        while (countryPass < 2 && accumulatedLeads.length < BATCH_TARGET) {
+          const currentNeeded = BATCH_TARGET - accumulatedLeads.length;
+          const fetchCount = Math.min(perCountryCount, currentNeeded);
+          const passPage = searchPage + countryPass;
 
-        addLog(`[国家: ${country}] 正在实时搜寻并验证该国 ${fetchCount} 条真实 B2B 分销商...`);
-        const progressPct = 30 + Math.floor(((i + 1) / targetCountries.length) * 50);
-        setSearchState((prev) => ({ ...prev, progress: progressPct }));
+          addLog(`[国家: ${country}] 正在实时搜寻并验证该国 ${fetchCount} 条真实 B2B 分销商 (批次 ${passPage})...`);
+          const progressPct = 30 + Math.floor(((i + 1) / targetCountries.length) * 50);
+          setSearchState((prev) => ({ ...prev, progress: progressPct }));
 
-        const rawCountryLeads = await geminiService.simulateLeads(
-          country,
-          keywords.englishCore,
-          keywords.localCore,
-          fetchCount,
-          searchPage,
-          existingCompanyNames.slice(0, 15),
-          topSuggestions,
-        );
+          const currentExcludes = [
+            ...existingCompanyNames,
+            ...accumulatedLeads.map((l) => l.companyName),
+          ];
 
-        // Anti-fake filter in App.tsx as defense in depth
-        const validCountryLeads = (rawCountryLeads || []).filter((lead: any) =>
-          isRealNonSyntheticCompany(lead),
-        );
+          const rawCountryLeads = await geminiService.simulateLeads(
+            country,
+            keywords.englishCore,
+            keywords.localCore,
+            fetchCount,
+            passPage,
+            currentExcludes.slice(0, 30),
+            topSuggestions,
+          );
 
-        addLog(
-          `[国家: ${country}] 成功提取 ${validCountryLeads.length} 条经过真实验证的企业数据。`,
-        );
-        accumulatedLeads.push(...validCountryLeads);
+          // Anti-fake filter in App.tsx as defense in depth
+          const validCountryLeads = (rawCountryLeads || []).filter((lead: any) =>
+            isRealNonSyntheticCompany(lead),
+          );
+
+          addLog(
+            `[国家: ${country}] 本轮提取 ${validCountryLeads.length} 条经过真实验证的企业数据。`,
+          );
+          accumulatedLeads.push(...validCountryLeads);
+          countryPass++;
+
+          if (validCountryLeads.length === 0) break;
+        }
       }
 
       setSearchState((prev) => ({ ...prev, progress: 85 }));
@@ -529,6 +541,17 @@ export default function App() {
         isSearching: false,
       }));
       addLog(`自动化获客任务成功执行！已搜寻并归档 ${processedNewLeads.length} 条真实有效线索。`);
+
+      // Completion Alert Popup Notification
+      setTimeout(() => {
+        alert(
+          `🎉 自动化获客任务抓取完成！\n\n` +
+          `本次任务成功搜寻并归档 ${processedNewLeads.length} 条真实有效 B2B 线索：\n` +
+          `• 🆕 全新线索：${newLeadsToSave.length} 条${user ? "（已自动同步至云端 CRM）" : ""}\n` +
+          `• 🔄 CRM 库已有：${duplicateCount} 条\n\n` +
+          `数据已实时呈现在下方“全球线索库 & CRM”列表中！`
+        );
+      }, 200);
     } catch (error: any) {
       console.error("Automation error:", error);
       const errorMsg =
