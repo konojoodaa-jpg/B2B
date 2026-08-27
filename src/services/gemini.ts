@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
+// Evidence-first lead discovery pipeline. Keep this marker so branch updates create a real commit.
 let aiInstance: GoogleGenAI | null = null;
 
 function getAI() {
